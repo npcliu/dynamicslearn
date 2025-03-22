@@ -1,5 +1,5 @@
 # 2025.03.22更新
-使用isaacgym采集的固定基数据，状态量为10个关节角，仅有正动力学，先保存一下，以便后续更改
+使用isaacgym采集的固定基数据，状态量为10个关节角，仅有正动力学，先保存一下，以便后续更改。同时保存一下训练结果（simplelog/seed=21,pred_horizon=10,batch_size=1000,lr=0.0001,ntrajs=8192,uscale=10.0,dt=0.001）
 
 # MechaModLearn
 
