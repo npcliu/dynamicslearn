@@ -4,6 +4,7 @@
 
 import abc
 import torch
+import numpy as np
 
 
 class FixedGridODESolver(metaclass=abc.ABCMeta):
@@ -39,24 +40,29 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         _assert_increasing(t)
         if u is None:
             u = [None] * len(t)
-
+        # print(u.shape)
+        # print(self.y0)
         t = t.type_as(self.y0[0])
         time_grid = self.grid_constructor(self.func, self.y0, t)
         assert time_grid[0] == t[0] and time_grid[-1] == t[-1]
         time_grid = time_grid.to(self.y0[0])
 
         solution = [self.y0]
+        # print(u[0].shape)
         j = 1
         y0 = self.y0
         for t0, t1 in zip(time_grid[:-1], time_grid[1:]):
             dy = self.step_func(self.func, t0, t1 - t0, y0, u=u[j - 1])
             y1 = tuple(trans(y0_ + dy_) for y0_, dy_, trans in zip(y0, dy, self.transforms))
             y0 = y1
-
+            # print(dy)
+            # print(y1)
             while j < len(t) and t1 >= t[j]:
                 solution.append(self._linear_interp(t0, t1, y0, y1, t[j]))
                 j += 1
-
+        #     print(len(solution[0]), len(solution[0][0]), len(solution[0][0][0]))
+        # print(len(solution[0]), len(solution[0][0]), len(solution[0][0][0]))
+        # print(solution)
         return tuple(map(torch.stack, tuple(zip(*solution))))
 
     def _linear_interp(self, t0, t1, y0, y1, t):
@@ -180,6 +186,8 @@ def _check_inputs(func, y0, t):
         func = ActuatedODEWrapper(func)
 
     tensor_input = False
+    # print([len(item) for item in y0])
+    # print(y0[0].shape)
     if torch.is_tensor(y0):
         tensor_input = True
         y0 = (y0,)

@@ -49,9 +49,24 @@ class ActuatedTrajectoryDataset(dataset.TensorDataset):
         # wrap angles
         q_T_B = utils.wrap_to_pi(q_T_B.view(-1, system._qdim), system.thetamask).view(
             len(t_points), -1, system._qdim)
+        q_T_B = q_T_B.to(device='cuda:0')
+        v_T_B = v_T_B.to(device='cuda:0')
+        u_T_B = u_T_B.to(device='cuda:0')
+        print(q_T_B.shape)
         return cls(q_T_B, v_T_B, u_T_B)
 
+    @classmethod
+    def FromExternalData(cls, system, data):
+        """
+        Get trajectories given initial conditions, list of torques to apply
+        for a given system and time
+        """
 
+        timestamps_data, q_data, dq_data, tau_data = data
+        # print(timestamps_data.shape)
+        # print(q_data.shape)
+        return cls(q_data, dq_data, tau_data)
+    
 class ODEPredDataset(dataset.Dataset):
 
     def __init__(self, qs: list, vs: list, ulist: list):

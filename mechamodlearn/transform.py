@@ -39,6 +39,10 @@ def odepred_transform(traj_dataset: ActuatedTrajectoryDataset, chunk_size: int) 
         qs_C = traj_dataset.q_B_T.unbind(1)
         vs_C = traj_dataset.v_B_T.unbind(1)
         us_C = traj_dataset.u_B_T.unbind(1)
+        # print(traj_dataset.q_B_T.shape)
+        # print(qs_C[0].shape)
+        # print(len(qs_C))
+        
 
     else:
         raise ValueError("{} < chunk size {}".format(traj_dataset.q_B_T.size(1), chunk_size))

@@ -28,6 +28,7 @@ def plot_traj(system_x_T_B, model_x_T_B, tstar):
 
 def vizqvmodel(model, q_B_T, v_B_T, u_B_T, t_points, method='rk4'):
     B = q_B_T.size(0)
+    # TODO:画图时这些张量或元组的维度还有问题，要改
     q_T_B = q_B_T.transpose(1, 0)
     v_T_B = v_B_T.transpose(1, 0)
     u_T_B = u_B_T.transpose(1, 0)

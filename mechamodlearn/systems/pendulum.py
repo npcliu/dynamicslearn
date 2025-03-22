@@ -52,10 +52,10 @@ class SimplePendulum(AbstractRigidBody, torch.nn.Module):
         self._qdim = 1
         self._udim = 1
 
-        self._thetamask = torch.tensor([1])
+        self._thetamask = torch.tensor([1], device='cuda:0')
 
         if params is None:
-            params = torch.abs(torch.randn(2))
+            params = torch.abs(torch.randn(2), device='cuda:0')
 
         assert params.shape == (2,)
 

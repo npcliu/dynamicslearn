@@ -154,7 +154,7 @@ class GeneralizedForces(torch.nn.Module):
         self.forces = torch.nn.ModuleList(forces)
 
     def forward(self, q, v, u):
-        F = torch.zeros(q.size(0), q.size(1), 1)
+        F = torch.zeros(q.size(0), q.size(1), 1, device='cuda:0')
         for f in self.forces:
             F += f(q, v, u)
 

@@ -1,3 +1,6 @@
+# 2025.03.22更新
+使用isaacgym采集的固定基数据，状态量为10个关节角，仅有正动力学，先保存一下，以便后续更改
+
 # MechaModLearn
 
 Authors: [@kunalmenda](https://github.com/kunalmenda) and [@rejuvyesh](https://github.com/rejuvyesh)

@@ -47,6 +47,7 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+/simplelog
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -98,3 +99,5 @@ python_boilerplate/
 *.pdf
 *.mp4
 .mypy_cache
+*.h5
+*.png

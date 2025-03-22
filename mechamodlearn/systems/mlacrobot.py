@@ -90,7 +90,7 @@ class MultiLinkAcrobot(AbstractRigidBody, torch.nn.Module):
         self._qdim = qdim
         self._udim = qdim
 
-        self._thetamask = torch.tensor([1.] * qdim)
+        self._thetamask = torch.tensor([1.] * qdim, device='cuda:0')
         super().__init__()
 
         if params is None:

@@ -178,13 +178,14 @@ class OfflineTrainer(TrainerBase):
             should_log_parameter_statistics: bool = False,
             log_viz: bool = False,
             viz_func=None,
-            device='cpu',):
+            device='cpu'):
 
         metric_tracker = MetricTracker(patience, True)
         super().__init__(model, optimizer, logdir, metric_tracker)
 
         self._dt = dt
         self._pred_horizon = pred_horizon
+        print(train_dataset.q_B_T.device)
         self._train_dataset = train_dataset
         self._validation_dataset = validation_dataset
 
@@ -203,18 +204,18 @@ class OfflineTrainer(TrainerBase):
         self._viz_func = viz_func
         self._device = device
         self.model.to(device=self._device)
-
+        
     def train(self):
         logger.info("Begin training...")
-        try:
-            epoch_counter = self._restore_checkpoint()
-        except RuntimeError:
-            traceback.print_exc()
-            raise Exception(
-                "Could not recover training from the checkpoint.  Did you mean to output to "
-                "a different serialization directory or delete the existing log "
-                "directory?")
-
+        # try:
+        #     epoch_counter = self._restore_checkpoint()
+        # except RuntimeError:
+        #     traceback.print_exc()
+        #     raise Exception(
+        #         "Could not recover training from the checkpoint.  Did you mean to output to "
+        #         "a different serialization directory or delete the existing log "
+        #         "directory?")
+        epoch_counter = 0
         train_metrics = {}
         valid_metrics = {}
         metrics = {}
@@ -224,8 +225,8 @@ class OfflineTrainer(TrainerBase):
 
         metrics['best_epoch'] = self._metric_tracker.best_epoch
 
-        for key, value in self._metric_tracker.best_epoch_metrics.items():
-            metrics["best_validation/" + key] = value
+        # for key, value in self._metric_tracker.best_epoch_metrics.items():
+        #     metrics["best_validation/" + key] = value
 
         for epoch in range(epoch_counter, self._num_epochs):
             epoch_start_time = time.time()
@@ -239,18 +240,18 @@ class OfflineTrainer(TrainerBase):
                 metrics['peak_cpu_memory_MB'] = max(
                     metrics.get('peak_cpu_memory_MB', 0), train_metrics['cpu_memory_MB'])
 
-            if self._validation_dataset is not None:
-                with utils.Timer() as val_dt:
-                    valid_metrics = self._validation()
-                    this_epoch_valid_metric = valid_metrics['loss/mean']
+            # if self._validation_dataset is not None:
+            #     with utils.Timer() as val_dt:
+            #         valid_metrics = self._validation()
+            #         this_epoch_valid_metric = valid_metrics['loss/mean']
 
-                    self._metric_tracker.add_metric(this_epoch_valid_metric)
+            #         self._metric_tracker.add_metric(this_epoch_valid_metric)
 
-                    if self._metric_tracker.should_stop_early():
-                        logger.info("Ran out of patience.  Stopping training.")
-                        break
+            #         if self._metric_tracker.should_stop_early():
+            #             logger.info("Ran out of patience.  Stopping training.")
+            #             break
 
-                valid_metrics['epoch_time'] = val_dt.dt
+            #     valid_metrics['epoch_time'] = val_dt.dt
 
             training_elapsed_time = time.time() - training_start_time
             metrics["training_duration"] = time.strftime("%H:%M:%S",
@@ -262,45 +263,45 @@ class OfflineTrainer(TrainerBase):
             for k, v in train_metrics.items():
                 logger.logkv("training/{}".format(k), v)
 
-            for k, v in valid_metrics.items():
-                logger.logkv("validation/{}".format(k), v)
+            # for k, v in valid_metrics.items():
+            #     logger.logkv("validation/{}".format(k), v)
 
             if self._logdir:
                 if (epochs_trained % self._ckpt_interval == 0) or (
                         epochs_trained + 1) == self._num_epochs:
                     self._save_checkpoint(epoch)
 
-            if self._metric_tracker.is_best_so_far():
-                # Update all the best_ metrics.
-                # (Otherwise they just stay the same as they were.)
-                metrics['best_epoch'] = epoch
-                for key, value in valid_metrics.items():
-                    metrics["best_validation_" + key] = value
+            # if self._metric_tracker.is_best_so_far():
+            #     # Update all the best_ metrics.
+            #     # (Otherwise they just stay the same as they were.)
+            #     metrics['best_epoch'] = epoch
+            #     for key, value in valid_metrics.items():
+            #         metrics["best_validation_" + key] = value
 
-                self._metric_tracker.best_epoch_metrics = valid_metrics
+            #     self._metric_tracker.best_epoch_metrics = valid_metrics
 
-            if self._learning_rate_scheduler:
-                self._learning_rate_scheduler.step()
+            # if self._learning_rate_scheduler:
+            #     self._learning_rate_scheduler.step()
 
-            if (epochs_trained == 0) or epochs_trained % self._summary_interval == 0:
-                if self._should_log_parameter_statistics:
-                    self._parameter_and_gradient_statistics()
+            # if (epochs_trained == 0) or epochs_trained % self._summary_interval == 0:
+            #     # if self._should_log_parameter_statistics:
+            #     #     self._parameter_and_gradient_statistics()
 
-                train_metrics_ = self._metrics(self._train_dataset)
-                for k, v in train_metrics_.items():
-                    logger.logkv("training/{}".format(k), v)
+            #     # train_metrics_ = self._metrics(self._train_dataset)
+            #     # for k, v in train_metrics_.items():
+            #     #     logger.logkv("training/{}".format(k), v)
 
-                val_metrics_ = self._metrics(self._validation_dataset)
-                for k, v in val_metrics_.items():
-                    logger.logkv("validation/{}".format(k), v)
+            #     # val_metrics_ = self._metrics(self._validation_dataset)
+            #     # for k, v in val_metrics_.items():
+            #     #     logger.logkv("validation/{}".format(k), v)
 
-                if self._log_viz:
-                    try:
-                        fig_map = self._viz_func(self.model)
-                        for k, fig in fig_map.items():
-                            logger.add_figure(k, fig)
-                    except Exception as e:
-                        logger.info("Couldn't log viz: {}".format(e))
+            #     if self._log_viz:
+            #         try:
+            #             fig_map = self._viz_func(self.model)
+            #             # for k, fig in fig_map.items():
+            #             #     logger.add_figure(k, fig)
+            #         except Exception as e:
+            #             logger.info("Couldn't log viz: {}".format(e))
 
             epoch_elapsed_time = time.time() - epoch_start_time
             logger.info("Epoch duration: %s",
@@ -329,12 +330,18 @@ class OfflineTrainer(TrainerBase):
         gradtimer_ls = []
 
         train_data = self._train_dataset
+        print(train_data.q_B_T.device)
+        # print(train_data.q_B_T.shape)
         if isinstance(train_data, dataset.ActuatedTrajectoryDataset):
             train_data = transform.odepred_transform(train_data, self._pred_horizon)
-
+        print(train_data.qs_tensors[0].device)
+        # print(len(train_data.qs_tensors))
         train_generator = torch.utils.data.DataLoader(train_data, shuffle=self._shuffle,
                                                       batch_size=self._batch_size)
         for qs, vs, us in tqdm.tqdm(train_generator, total=len(train_generator)):
+            # print(len(qs))
+            # print(qs)
+            
             self.optimizer.zero_grad()
             with utils.Timer() as losstime:
                 loss, loss_info = compute_qvloss(
@@ -356,6 +363,7 @@ class OfflineTrainer(TrainerBase):
 
         metrics = {}
         loss_info = nested.zip(*loss_info_ls)
+        metrics['epochs'] = epoch
         metrics['cpu_memory_MB'] = peak_mem_usage
         metrics['loss/mean'] = np.mean(loss_ls)
         metrics['loss/std'] = np.std(loss_ls)
@@ -384,7 +392,6 @@ class OfflineTrainer(TrainerBase):
         val_data = self._validation_dataset
         if isinstance(val_data, dataset.ActuatedTrajectoryDataset):
             val_data = transform.odepred_transform(val_data, self._pred_horizon)
-
         val_generator = torch.utils.data.DataLoader(val_data, shuffle=False,
                                                     batch_size=self._batch_size)
         loss_ls = []
@@ -406,8 +413,8 @@ class OfflineTrainer(TrainerBase):
 
         metrics['loss/mean'] = np.mean(loss_ls)
         metrics['loss/std'] = np.std(loss_ls)
-        metrics['log10loss/mean'] = np.mean(np.log10(loss_ls))
-        metrics['log10loss/std'] = np.std(np.log10(loss_ls))
+        # metrics['log10loss/mean'] = np.mean(np.log10(loss_ls))
+        # metrics['log10loss/std'] = np.std(np.log10(loss_ls))
         for k, val in loss_info.items():
             metrics['loss/{}/mean'.format(k)] = np.mean(val)
             metrics['loss/{}/std'.format(k)] = np.std(val)
@@ -488,22 +495,39 @@ def compute_qvloss(model, q_T_B, v_T_B, u_T_B, dt, vlambda=1.0, method='rk4', pr
 
     T = u_T_B.size(0)
     t_points = torch.arange(0, T * dt + dt / 2, dt)[:-1].to(q_T_B.device).requires_grad_(True)
+    # print(np.array(u_T_B.cpu()).shape)
+    # print(t_points.shape)
+    # print(np.array(q_T_B.cpu()).shape)
     assert len(t_points) == T
     # Simulate forward
     qpreds_T_B, vpreds_T_B = odeint(model, (q_T_B[0], v_T_B[0]), t_points, u=u_T_B, method=method,
                                     transforms=(lambda x: utils.wrap_to_pi(x, model.thetamask),
                                                 lambda x: x))
-
+    # print('qpreds_T_B.shape', qpreds_T_B.shape)
     # Wrap angles
     qpreds_T_B = utils.wrap_to_pi(qpreds_T_B.view(-1, model._qdim), model.thetamask).view(
         T, -1, model._qdim)
-
     qdiff = utils.diffangles(
         q_T_B.view(-1, model._qdim), qpreds_T_B.view(-1, model._qdim), mask=model.thetamask).view(
             T, -1, model._qdim)
+    # print(qdiff)
+    # print('qdiff', qdiff.shape)
+    qdiff = qdiff / torch.pi
+    # TT = qdiff.shape[0]  # 获取时间步数
+    # # 生成逆序间隔采样索引
+    # selected_indices = torch.arange(start=TT-1, end=-1, step=-5)  # 从最后一个元素开始，步长-5
+    # selected_indices = selected_indices[:4]  # 确保最多取4个（当T>=20时）
+    # # 切片提取数据
+    # selected_qdiff = qdiff[selected_indices]  # [4, 128, 10]
+    # # print(selected_qdiff.shape)
+    # q_loss = 0.5 * (selected_qdiff**2).sum(0).sum(-1).mean()
     q_loss = 0.5 * (qdiff**2).sum(0).sum(-1).mean()
-
+    
     vdiff = (v_T_B - vpreds_T_B)
+    vdiff = vdiff / 20
+    # selected_qdiff = vdiff[selected_indices]  # [4, 128, 10]
+    # v_loss = 0.5 * (selected_qdiff**2).sum(0).sum(-1).mean()
+    # print(selected_qdiff.shape)
     v_loss = 0.5 * (vdiff**2).sum(0).sum(-1).mean()
 
     loss = q_loss + vlambda * v_loss

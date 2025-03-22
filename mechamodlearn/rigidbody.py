@@ -127,7 +127,8 @@ class AbstractRigidBody:
             F = self.generalized_force(q, v, u)
 
         # Solve M \qddot = F - Cv - G
-        qddot = torch.gesv(F - Cv - G.unsqueeze(2), M)[0].squeeze(2)
+        # qddot = torch.gesv(F - Cv - G.unsqueeze(2), M)[0].squeeze(2)
+        qddot = torch.linalg.solve(M, u.unsqueeze(-1) + F - Cv - G.unsqueeze(2)).squeeze(2)
         return qddot
 
 
