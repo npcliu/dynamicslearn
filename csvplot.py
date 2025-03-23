@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # 数据读取与预处理
-df = pd.read_csv('/home/liu/bruce/brucesim2real/mechamodlearn/simplelog/seed=21,pred_horizon=10,batch_size=1000,lr=0.0001,ntrajs=8192,uscale=10.0,dt=0.001/progress.csv')
+df = pd.read_csv('simplelog/20250323_102242/progress.csv')
 # df['training/epochs'] = df['training/epochs'].fillna(0)  # 处理缺失的epoch值
 
 # 设置中文显示（如需要）

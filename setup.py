@@ -13,7 +13,7 @@ setup(
     long_description_content_type="text/markdown",
     install_requires=[
         'click',
-        'py-dateutil',
+        'py-dateutil >= 2.9.0',
         'ipdb',
         'torch >= 1.0',
         'numpy >= 1.13',

@@ -114,7 +114,7 @@ def train(seed: int, dt: float, pred_horizon: int, num_epochs: int, batch_size: 
     
     system = ExternalData(10, 10, DEVICE)
     train_dataset, valid_dataset, test_dataset = get_dataset(system, pred_horizon * dt, dt, 
-            '/home/liu/bruce/brucesim2real/mechamodlearn/isaacdataset.h5')
+            'isaacdataset.h5')
     print(train_dataset.q_B_T[0])
 
     def viz(model):
@@ -135,7 +135,7 @@ def train(seed: int, dt: float, pred_horizon: int, num_epochs: int, batch_size: 
     # scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=batch_size, gamma=0.5)
     
     if logdir is not None:
-        logdir = Path(logdir) / exp_name
+        logdir = Path(logdir) / '{:%Y%m%d_%H%M%S}'.format(datetime.now())
 
     trainer = OfflineTrainer(model, opt, dt, train_dataset, valid_dataset, learning_rate_scheduler=scheduler, 
                              pred_horizon=pred_horizon, num_epochs=num_epochs, batch_size=batch_size, vlambda=0.1, log_viz=True, viz_func=viz, 
@@ -153,13 +153,13 @@ def train(seed: int, dt: float, pred_horizon: int, num_epochs: int, batch_size: 
 @click.option('--seed', default=21, type=int)
 @click.option('--dt', default=0.001, type=float)
 # @click.option('--system', default='dampedpendulum', type=str)
-@click.option('--pred-horizon', default=10, type=int)
-@click.option('--num-epochs', default=700, type=int)
+@click.option('--pred-horizon', default=20, type=int)
+@click.option('--num-epochs', default=1000, type=int)
 @click.option('--batch-size', default=1000, type=int)
 @click.option('--lr', default=1e-4, type=float)
 @click.option('--ntrajs', default=8192, type=int)
 @click.option('--uscale', default=10.0, type=float)
-@click.option('--logdir', default='/home/liu/bruce/brucesim2real/mechamodlearn/simplelog', type=str)
+@click.option('--logdir', default='simplelog', type=str)
 def run(seed, dt, pred_horizon, num_epochs, batch_size, lr, ntrajs, uscale, logdir):
     metrics = train(seed, dt, pred_horizon, num_epochs, batch_size, lr, ntrajs, uscale,
                     logdir)
