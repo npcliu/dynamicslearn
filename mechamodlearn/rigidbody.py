@@ -4,7 +4,7 @@ import abc
 import torch
 
 from mechamodlearn import nn, utils
-from mechamodlearn.models import CholeskyMMNet, PotentialNet, GeneralizedForceNet
+from mechamodlearn.models import CholeskyMMNet, PotentialNet, GeneralizedForceNet, InvdynconsensusNet, NnmodelableDynNet
 
 
 class AbstractRigidBody:
@@ -25,7 +25,7 @@ class AbstractRigidBody:
         """Return potential for configuration q"""
 
     @abc.abstractmethod
-    def generalized_force(self, q, v, u):
+    def generalized_force(self, q, v):
         """Return generalized force for configuration q, velocity v, external torque u"""
 
     def kinetic_energy(self, q, v):
@@ -120,12 +120,16 @@ class AbstractRigidBody:
                 M = self.mass_matrix(q)
                 Cv = self.corriolisforce(q, v, M)
                 G = self.gradpotential(q)
+                self.M = M.clone()
+                self.Cv = Cv.clone()
+                self.G = G.clone()
 
-        F = torch.zeros_like(Cv)
+        # F = torch.zeros_like(Cv)
 
-        if u is not None:
-            F = self.generalized_force(q, v, u)
-
+        # if u is not None:
+        #     F = self.generalized_force(q, v)
+        F = self.generalized_force(q, v)
+        self.F = F.clone()
         # Solve M \qddot = F - Cv - G
         # qddot = torch.gesv(F - Cv - G.unsqueeze(2), M)[0].squeeze(2)
         qddot = torch.linalg.solve(M, u.unsqueeze(-1) + F - Cv - G.unsqueeze(2)).squeeze(2)
@@ -155,32 +159,63 @@ class LearnedRigidBody(AbstractRigidBody, torch.nn.Module):
         super().__init__()
 
         if mass_matrix is None:
-            mass_matrix = CholeskyMMNet(qdim, hidden_sizes=hidden_sizes)
-
+            mass_matrix = CholeskyMMNet(qdim, hidden_sizes=[16, 32, 64, 64])
+            # mass_matrix = CholeskyMMNet(qdim, hidden_sizes=hidden_sizes)
         self._mass_matrix = mass_matrix
 
         if potential is None:
-            potential = PotentialNet(qdim, hidden_sizes=hidden_sizes)
-
+            potential = PotentialNet(qdim, hidden_sizes=[16, 32, 32, 16])
+            # potential = PotentialNet(qdim, hidden_sizes=hidden_sizes)
         self._potential = potential
 
         if generalized_force is None:
-            generalized_force = GeneralizedForceNet(qdim, udim, hidden_sizes)
+            # generalized_force = GeneralizedForceNet(qdim, udim, hidden_sizes)
+            generalized_force = GeneralizedForceNet(qdim, hidden_sizes=[32, 64, 64, 16])
 
         self._generalized_force = generalized_force
-
+        self._invdyn_consensus = InvdynconsensusNet((qdim*4), hidden_sizes=[64, 64, 32, 16], output_dim=qdim)
+        # udim+1:tau的维度加上delta_t的维度
+        self._unmodelable_dyn = NnmodelableDynNet((qdim*3)+udim+1, hidden_sizes=[64, 64, 32, 16], output_dim=qdim)
+        self._unmodelable_inv_dyn = InvdynconsensusNet((qdim*4), hidden_sizes=[64, 64, 32, 16], output_dim=qdim)
+        self.M = torch.ones((500, self._qdim, self._qdim), device='cuda:0')
+        self.Cv = torch.ones((500, self._qdim, 1), device='cuda:0')
+        self.G = torch.ones((500, self._qdim), device='cuda:0')
+        self.F = torch.ones((500, self._qdim, 1), device='cuda:0')
     def mass_matrix(self, q):
         return self._mass_matrix(q)
 
     def potential(self, q):
         return self._potential(q)
 
-    def generalized_force(self, q, v, u):
-        return self._generalized_force(q, v, u)
+    def generalized_force(self, q, v):
+        return self._generalized_force(q, v)
+    
+    def invdyn_consensus(self, q, v, qddot, v_pre):
+        return self._invdyn_consensus(q, v, qddot, v_pre)
 
+    def unmodelable_dyn(self, q, v, qddot, u, delta_t):
+        return self._unmodelable_dyn(q, v, qddot, u, delta_t)
+    
+    def unmodelable_inv_dyn(self, q, v, qddot, v_pre):
+        return self._unmodelable_inv_dyn(q, v, qddot, v_pre)
+    
+    
+    def inv_dynamics(self, q, v, qddot, v_pre, delta_t):
+        # 机器人逆动力学，计算力矩
+        # F = torch.zeros_like(Cv)
+        # F = self.generalized_force(q, v)
+        invdyn_cons = self.invdyn_consensus(q, v, qddot, v_pre)
+        qddot_solve = qddot - self.unmodelable_inv_dyn(q, v, qddot, v_pre).squeeze(2)
+        # qddot_solve = qddot
+        result = torch.bmm(self.M, qddot_solve.unsqueeze(2))
+        u_hat = (result + self.Cv + self.G.unsqueeze(2) - self.F + invdyn_cons).squeeze(2)
+        return u_hat, qddot_solve
     @property
     def thetamask(self):
         return self._thetamask
 
-    def forward(self, q, v, u=None):
-        return self.solve_euler_lagrange(q, v, u)
+    def forward(self, q, v, u, delta_t):
+        qddot_solve = self.solve_euler_lagrange(q, v, u)
+        qddot = self.unmodelable_dyn(q, v, qddot_solve, u, delta_t).squeeze(2) + qddot_solve
+        # qddot = qddot_solve
+        return qddot, qddot_solve

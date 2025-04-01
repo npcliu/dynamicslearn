@@ -21,7 +21,8 @@ def odepred_transform(traj_dataset: ActuatedTrajectoryDataset, chunk_size: int) 
     qs_C = [[] for _ in range(chunk_size)]
     vs_C = [[] for _ in range(chunk_size)]
     us_C = [[] for _ in range(chunk_size)]
-
+    ts_C = [[] for _ in range(chunk_size)]
+    
     if traj_dataset.q_B_T.size(1) > chunk_size:
         for trajq_T_D in traj_dataset.q_B_T.unbind(0):
             fill_windowed(qs_C, trajq_T_D, chunk_size, step=1)
@@ -39,6 +40,7 @@ def odepred_transform(traj_dataset: ActuatedTrajectoryDataset, chunk_size: int) 
         qs_C = traj_dataset.q_B_T.unbind(1)
         vs_C = traj_dataset.v_B_T.unbind(1)
         us_C = traj_dataset.u_B_T.unbind(1)
+        ts_C = traj_dataset.t_B_T.unbind(1)
         # print(traj_dataset.q_B_T.shape)
         # print(qs_C[0].shape)
         # print(len(qs_C))
@@ -47,8 +49,8 @@ def odepred_transform(traj_dataset: ActuatedTrajectoryDataset, chunk_size: int) 
     else:
         raise ValueError("{} < chunk size {}".format(traj_dataset.q_B_T.size(1), chunk_size))
 
-    assert qs_C[0].size(0) == vs_C[0].size(0) == us_C[0].size(0)
+    assert qs_C[0].size(0) == vs_C[0].size(0) == us_C[0].size(0) == ts_C[0].size(0)
 
-    assert len(qs_C) == len(vs_C) == len(us_C)
+    assert len(qs_C) == len(vs_C) == len(us_C) == len(ts_C)
 
-    return ODEPredDataset(qs_C, vs_C, us_C)
+    return ODEPredDataset(qs_C, vs_C, us_C, ts_C)

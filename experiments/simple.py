@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 import click
+import numpy as np
 import torch
 
 from mechamodlearn import dataset, utils, viz_utils, rigidbody, models
@@ -13,6 +14,7 @@ from mechamodlearn.trainer import OfflineTrainer
 from mechamodlearn.systems import ActuatedDampedPendulum, DampedMultiLinkAcrobot, DEFAULT_SYS_PARAMS
 from mechamodlearn.rigidbody import LearnedRigidBody
 import h5py
+
 
 DEVICE = torch.device('cuda:0') if torch.cuda.is_available() else 'cpu'
 print(DEVICE)
@@ -28,7 +30,7 @@ class ExternalData:
         self._udim = udim
         self._device = device
         self.thetamask = torch.ones(10, device=DEVICE)
-        print('self.thetamask',self.thetamask)
+        print('self.thetamask', self.thetamask)
 
 
 # def get_dataset(system, T: float, dt: float, ntrajs: int, uscale: float, qrange=(-1, 1),
@@ -54,23 +56,59 @@ def get_dataset(system, T, dt, h5_file_path):
         print('please input h5 file!!!')
     else:
         with h5py.File(h5_file_path, 'r') as f:
-            timestamps_cpu = f['timestamps'][:]
-            q_cpu = f['q'][:]
-            dq_cpu = f['dq'][:]
-            tau_cpu = f['tau'][:]
+            timestamps = f['timestamps'][:]
+            q = f['q'][:].squeeze(axis=1)
+            dq = f['dq'][:].squeeze(axis=1)
+            tau = f['tau'][:].squeeze(axis=1)
+            
+        # 时间差计算（向量化运算优化）
+        time_diff = timestamps[1:] - timestamps[:-1]
+        # print(time_diff[0:10])
+        # print(min(time_diff))
+        invalid_indices = np.where(time_diff < 0.001)[0] + 1  # 标记异常点
+        
+        # 构建掩码数组
+        mask = np.ones(len(timestamps), dtype=bool)
+        mask[invalid_indices] = False
+
+        # 数据过滤 过滤掉时间差值小于1毫秒的数据
+        timestamps_cpu = timestamps[mask]
+        # time_diff = timestamps_cpu[1:] - timestamps_cpu[:-1]
+        # print(min(time_diff))
+        q_cpu = q[mask]
+        dq_cpu = dq[mask]
+        tau_cpu = tau[mask]
+        
+        # 重新计算时间差用于加速度计算
+        time_diff_valid = timestamps_cpu[1:] - timestamps_cpu[:-1]
+        dq_diff = dq_cpu[1:] - dq_cpu[:-1]
+        ddq_cpu = dq_diff / time_diff_valid
+        
+        # 为使 ddq 与其他数据维度一致，在第一个时刻填入第一个计算值（也可以设为 0）
+        ddq_cpu = np.vstack((ddq_cpu, ddq_cpu[-1, :]))
+            
         timestamps_gpu = torch.from_numpy(timestamps_cpu).to(system._device) 
-        q_gpu = torch.from_numpy(q_cpu).squeeze(dim=1).to(system._device) 
-        dq_gpu = torch.from_numpy(dq_cpu).squeeze(dim=1).to(system._device) 
-        tau_gpu = torch.from_numpy(tau_cpu).squeeze(dim=1).to(system._device) 
+        q_gpu = torch.from_numpy(q_cpu).to(system._device) 
+        dq_gpu = torch.from_numpy(dq_cpu).to(system._device) 
+        ddq_gpu = torch.from_numpy(ddq_cpu).to(system._device) 
+        tau_gpu = torch.from_numpy(tau_cpu).to(system._device) 
+        
+        print(tau_cpu[10:20, 0])
+        print(tau_gpu[10:20, 0])
         
         len_t = len(t_points)
         N = q_gpu.shape[0]
         timestamps_gpu_t = torch.stack([timestamps_gpu[i : i + (N - len_t + 1)] for i in range(len_t)], dim=0)
         q_gpu_t = torch.stack([q_gpu[i : i + (N - len_t + 1)] for i in range(len_t)], dim=0)
         dq_gpu_t = torch.stack([dq_gpu[i : i + (N - len_t + 1)] for i in range(len_t)], dim=0)
+        ddq_gpu_t = torch.stack([ddq_gpu[i : i + (N - len_t + 1)] for i in range(len_t)], dim=0)
         tau_gpu_t = torch.stack([tau_gpu[i : i + (N - len_t + 1)] for i in range(len_t)], dim=0) 
         q_gpu_t = utils.wrap_to_pi(q_gpu_t.view(-1, system._qdim), system.thetamask).view(
             len_t, -1, system._qdim) 
+        
+        print(tau_gpu_t[10:20, 0, 0])
+        # print(dq_gpu_t[0:10, 0, 0])
+        # print(tau_gpu_t[0:10, 0, 0])
         
         n_samples = q_gpu_t.shape[1]  # 获取样本数量 89997
         device = q_gpu_t.device  # 保持设备一致性
@@ -91,9 +129,9 @@ def get_dataset(system, T, dt, h5_file_path):
         valid_data = (timestamps_test, q_test, dq_test, tau_test)
         test_data = (timestamps_gpu_t[:, 65000:66000], q_gpu_t[:, 65000:66000, :], 
                      dq_gpu_t[:, 65000:66000, :], tau_gpu_t[:, 65000:66000, :])
-    train_dataset = dataset.ActuatedTrajectoryDataset.FromExternalData(system, train_data)
-    valid_dataset = dataset.ActuatedTrajectoryDataset.FromExternalData(system, valid_data)
-    test_dataset = dataset.ActuatedTrajectoryDataset.FromExternalData(system, test_data)
+    train_dataset = dataset.ActuatedTrajectoryDataset.FromExternalData(train_data)
+    valid_dataset = dataset.ActuatedTrajectoryDataset.FromExternalData(valid_data)
+    test_dataset = dataset.ActuatedTrajectoryDataset.FromExternalData(test_data)
     # print(data.q_B_T.shape)
     return train_dataset, valid_dataset, test_dataset
 
@@ -113,8 +151,10 @@ def train(seed: int, dt: float, pred_horizon: int, num_epochs: int, batch_size: 
     # test_dataset = get_dataset(system, 4, dt, 4, uscale)
     
     system = ExternalData(10, 10, DEVICE)
+    # train_dataset, valid_dataset, test_dataset = get_dataset(system, pred_horizon * dt, dt, 
+    #         'isaacdataset.h5') #isaacdataset
     train_dataset, valid_dataset, test_dataset = get_dataset(system, pred_horizon * dt, dt, 
-            'isaacdataset.h5')
+            'sim2realmujocodataset.h5') 
     print(train_dataset.q_B_T[0])
 
     def viz(model):
@@ -125,7 +165,7 @@ def train(seed: int, dt: float, pred_horizon: int, num_epochs: int, batch_size: 
                                     test_dataset.u_B_T.to(device=DEVICE), t_points)
 
     model = LearnedRigidBody(system._qdim, system._udim, system.thetamask,
-                             hidden_sizes=[32, 32, 32, 32])
+                             hidden_sizes=[32, 64, 96, 64])
     # potential = models.DelanZeroPotential(1)
     # model = rigidbody.DeLan(1, 32, 3, torch.tensor([1, 0]), udim=1, potential=potential)
 
@@ -138,25 +178,24 @@ def train(seed: int, dt: float, pred_horizon: int, num_epochs: int, batch_size: 
         logdir = Path(logdir) / '{:%Y%m%d_%H%M%S}'.format(datetime.now())
 
     trainer = OfflineTrainer(model, opt, dt, train_dataset, valid_dataset, learning_rate_scheduler=scheduler, 
-                             pred_horizon=pred_horizon, num_epochs=num_epochs, batch_size=batch_size, vlambda=0.1, log_viz=True, viz_func=viz, 
-                             ckpt_interval=100, summary_interval=200, shuffle=True, integration_method='midpoint', 
+                             pred_horizon=pred_horizon, num_epochs=num_epochs, batch_size=batch_size, vlambda=1, log_viz=True, viz_func=viz, 
+                             ckpt_interval=100, summary_interval=200, shuffle=True, integration_method='euler', 
                              logdir=logdir, device=DEVICE)
 
     metrics = trainer.train()
 
     if logdir is not None:
-        torch.save(metrics, Path(logdir) / 'metrics_{:%Y%m%d-%H%M%S}.pt'.format(datetime.now()))
+        torch.save(model, Path(logdir) / 'metrics_{:%Y%m%d-%H%M%S}.pt'.format(datetime.now()))
     return metrics
 
 
 @click.command()
 @click.option('--seed', default=21, type=int)
 @click.option('--dt', default=0.001, type=float)
-# @click.option('--system', default='dampedpendulum', type=str)
-@click.option('--pred-horizon', default=20, type=int)
-@click.option('--num-epochs', default=1000, type=int)
-@click.option('--batch-size', default=1000, type=int)
-@click.option('--lr', default=1e-4, type=float)
+@click.option('--pred-horizon', default=10, type=int)
+@click.option('--num-epochs', default=600, type=int)
+@click.option('--batch-size', default=500, type=int)
+@click.option('--lr', default=4e-3, type=float)
 @click.option('--ntrajs', default=8192, type=int)
 @click.option('--uscale', default=10.0, type=float)
 @click.option('--logdir', default='simplelog', type=str)

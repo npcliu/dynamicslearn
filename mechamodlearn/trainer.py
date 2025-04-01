@@ -235,10 +235,10 @@ class OfflineTrainer(TrainerBase):
 
             train_metrics['epoch_time'] = tr_dt.dt
 
-            # get peak of memory usage
-            if 'cpu_memory_MB' in train_metrics:
-                metrics['peak_cpu_memory_MB'] = max(
-                    metrics.get('peak_cpu_memory_MB', 0), train_metrics['cpu_memory_MB'])
+            # # get peak of memory usage
+            # if 'cpu_memory_MB' in train_metrics:
+            #     metrics['peak_cpu_memory_MB'] = max(
+            #         metrics.get('peak_cpu_memory_MB', 0), train_metrics['cpu_memory_MB'])
 
             # if self._validation_dataset is not None:
             #     with utils.Timer() as val_dt:
@@ -338,7 +338,7 @@ class OfflineTrainer(TrainerBase):
         # print(len(train_data.qs_tensors))
         train_generator = torch.utils.data.DataLoader(train_data, shuffle=self._shuffle,
                                                       batch_size=self._batch_size)
-        for qs, vs, us in tqdm.tqdm(train_generator, total=len(train_generator)):
+        for qs, vs, us, ts in tqdm.tqdm(train_generator, total=len(train_generator)):
             # print(len(qs))
             # print(qs)
             
@@ -348,7 +348,9 @@ class OfflineTrainer(TrainerBase):
                     ActuatedODEWrapper(self.model),
                     torch.stack(qs).to(self._device),
                     torch.stack(vs).to(self._device),
-                    torch.stack(us).to(self._device), dt=self._dt, vlambda=self._vlambda,
+                    torch.stack(us).to(self._device), 
+                    torch.stack(ts).to(self._device), 
+                    vlambda=self._vlambda,
                     method=self._integration_method)
 
             with utils.Timer() as gradtime:
@@ -364,23 +366,23 @@ class OfflineTrainer(TrainerBase):
         metrics = {}
         loss_info = nested.zip(*loss_info_ls)
         metrics['epochs'] = epoch
-        metrics['cpu_memory_MB'] = peak_mem_usage
+        # metrics['cpu_memory_MB'] = peak_mem_usage
         metrics['loss/mean'] = np.mean(loss_ls)
         metrics['loss/std'] = np.std(loss_ls)
-        metrics['log10loss/mean'] = np.mean(np.log10(loss_ls))
-        metrics['log10loss/std'] = np.std(np.log10(loss_ls))
+        # metrics['log10loss/mean'] = np.mean(np.log10(loss_ls))
+        # metrics['log10loss/std'] = np.std(np.log10(loss_ls))
         for k, val in loss_info.items():
             metrics['loss/{}/mean'.format(k)] = np.mean(val)
             metrics['loss/{}/std'.format(k)] = np.std(val)
 
-        metrics['time/loss/mean'] = np.mean(losstimer_ls)
-        metrics['time/loss/std'] = np.std(losstimer_ls)
-        metrics['time/loss/max'] = np.max(losstimer_ls)
-        metrics['time/loss/min'] = np.min(losstimer_ls)
-        metrics['time/grad/mean'] = np.mean(gradtimer_ls)
-        metrics['time/grad/std'] = np.std(gradtimer_ls)
-        metrics['time/grad/max'] = np.max(gradtimer_ls)
-        metrics['time/grad/min'] = np.min(gradtimer_ls)
+        # metrics['time/loss/mean'] = np.mean(losstimer_ls)
+        # metrics['time/loss/std'] = np.std(losstimer_ls)
+        # metrics['time/loss/max'] = np.max(losstimer_ls)
+        # metrics['time/loss/min'] = np.min(losstimer_ls)
+        # metrics['time/grad/mean'] = np.mean(gradtimer_ls)
+        # metrics['time/grad/std'] = np.std(gradtimer_ls)
+        # metrics['time/grad/max'] = np.max(gradtimer_ls)
+        # metrics['time/grad/min'] = np.min(gradtimer_ls)
 
         if self._learning_rate_scheduler:
             metrics['lr'] = self._learning_rate_scheduler.get_lr()[0]
@@ -478,7 +480,7 @@ class OfflineTrainer(TrainerBase):
         return metrics
 
 
-def compute_qvloss(model, q_T_B, v_T_B, u_T_B, dt, vlambda=1.0, method='rk4', preds=False):
+def compute_qvloss(model, q_T_B, v_T_B, u_T_B, t_T_B, vlambda=1.0, method='rk4', preds=False):
     """Computes T-step loss
     Arguments:
     - `q_T_B` : (Timesteps x Batch_size x qdim) tensor of gen. coordinates
@@ -494,15 +496,18 @@ def compute_qvloss(model, q_T_B, v_T_B, u_T_B, dt, vlambda=1.0, method='rk4', pr
     """
 
     T = u_T_B.size(0)
-    t_points = torch.arange(0, T * dt + dt / 2, dt)[:-1].to(q_T_B.device).requires_grad_(True)
-    # print(np.array(u_T_B.cpu()).shape)
-    # print(t_points.shape)
-    # print(np.array(q_T_B.cpu()).shape)
-    assert len(t_points) == T
+    # dt = 0.001
+    # t_T_B_ = torch.arange(0, T * dt + dt / 2, dt)[:-1].to(q_T_B.device).requires_grad_(True)
+    # assert len(t_points) == T
+    # print(q_T_B[0].shape)
     # Simulate forward
-    qpreds_T_B, vpreds_T_B = odeint(model, (q_T_B[0], v_T_B[0]), t_points, u=u_T_B, method=method,
-                                    transforms=(lambda x: utils.wrap_to_pi(x, model.thetamask),
-                                                lambda x: x))
+    solution, u_hat_T_B, qddot_sol_forward_dyn_tensor, qddot_sol_inv_dyn_tensor, u_tensor = \
+                odeint(model, (q_T_B[0], v_T_B[0]), t_T_B, u=u_T_B, method=method,
+                       transforms=(lambda x: utils.wrap_to_pi(x, model.thetamask),
+                       lambda x: x))
+    qpreds_T_B, vpreds_T_B = solution
+    # print(vpreds_T_B[:, 0, 0])
+    # print(u_hat_T_B)
     # print('qpreds_T_B.shape', qpreds_T_B.shape)
     # Wrap angles
     qpreds_T_B = utils.wrap_to_pi(qpreds_T_B.view(-1, model._qdim), model.thetamask).view(
@@ -510,7 +515,8 @@ def compute_qvloss(model, q_T_B, v_T_B, u_T_B, dt, vlambda=1.0, method='rk4', pr
     qdiff = utils.diffangles(
         q_T_B.view(-1, model._qdim), qpreds_T_B.view(-1, model._qdim), mask=model.thetamask).view(
             T, -1, model._qdim)
-    # print(qdiff)
+    # print(q_T_B[1, 0, :])
+    # print(qpreds_T_B[1, 0, :])
     # print('qdiff', qdiff.shape)
     qdiff = qdiff / torch.pi
     # TT = qdiff.shape[0]  # 获取时间步数
@@ -529,9 +535,20 @@ def compute_qvloss(model, q_T_B, v_T_B, u_T_B, dt, vlambda=1.0, method='rk4', pr
     # v_loss = 0.5 * (selected_qdiff**2).sum(0).sum(-1).mean()
     # print(selected_qdiff.shape)
     v_loss = 0.5 * (vdiff**2).sum(0).sum(-1).mean()
-
-    loss = q_loss + vlambda * v_loss
-    info = dict(q_loss=q_loss.cpu().detach().item(), v_loss=v_loss.cpu().detach().item())
+    u_pred_size = u_T_B.size(0) - 1
+    u_T_B_ = u_T_B[0:u_pred_size]
+    udiff = (u_hat_T_B - u_T_B_)
+    udiff = udiff / 10
+    u_loss = 0.5 * (udiff**2).sum(0).sum(-1).mean()
+    
+    qddotdiff = (qddot_sol_forward_dyn_tensor - qddot_sol_inv_dyn_tensor)
+    qddot_loss = 0.5 * (qddotdiff**2).sum(0).sum(-1).mean()
+    
+    # loss = 1 * (1*q_loss + vlambda * 1 * v_loss + 1 * u_loss + 1 * qddot_loss)
+    loss = 1 * (vlambda * 10 * v_loss + 0.3 * u_loss + 0.3 * qddot_loss)
+    info = dict(q_loss=q_loss.cpu().detach().item(), v_loss=v_loss.cpu().detach().item(), u_loss=u_loss.cpu().detach().item(), qddot_loss=qddot_loss.cpu().detach().item())
+    # loss = 3 * (1*q_loss + vlambda * 3 * v_loss + 3 * u_loss)
+    # info = dict(q_loss=q_loss.cpu().detach().item(), v_loss=v_loss.cpu().detach().item(), u_loss=u_loss.cpu().detach().item())
 
     if preds:
         return loss, info, (qpreds_T_B, vpreds_T_B)
