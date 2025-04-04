@@ -92,37 +92,37 @@ class ResMLP(nn.Module):
     
 
 
-# class LNMLP(torch.nn.Module):
+class LNMLP(torch.nn.Module):
 
-#     def __init__(self, input_size, hidden_sizes, output_size, activation='tanh', gain=1.0,
-#                  ln=False):
-#         self._hidden_sizes = hidden_sizes
-#         self._gain = gain
-#         self._ln = ln
-#         super().__init__()
-#         activation = ACTIVATIONS[activation]
-#         layers = [torch.nn.Linear(input_size, hidden_sizes[0])]
-#         layers.append(activation())
-#         if ln:
-#             layers.append(torch.nn.LayerNorm(hidden_sizes[0]))
+    def __init__(self, input_size, hidden_sizes, output_size, activation='tanh', gain=1.0,
+                 ln=False):
+        self._hidden_sizes = hidden_sizes
+        self._gain = gain
+        self._ln = ln
+        super().__init__()
+        activation = ACTIVATIONS[activation]
+        layers = [torch.nn.Linear(input_size, hidden_sizes[0])]
+        layers.append(activation())
+        if ln:
+            layers.append(torch.nn.LayerNorm(hidden_sizes[0]))
 
-#         for i in range(len(hidden_sizes) - 1):
-#             layers.append(torch.nn.Linear(hidden_sizes[i], hidden_sizes[i + 1]))
-#             layers.append(activation())
-#             if ln:
-#                 layers.append(torch.nn.LayerNorm(hidden_sizes[i + 1]))
+        for i in range(len(hidden_sizes) - 1):
+            layers.append(torch.nn.Linear(hidden_sizes[i], hidden_sizes[i + 1]))
+            layers.append(activation())
+            if ln:
+                layers.append(torch.nn.LayerNorm(hidden_sizes[i + 1]))
 
-#         layers.append(torch.nn.Linear(hidden_sizes[-1], output_size))
+        layers.append(torch.nn.Linear(hidden_sizes[-1], output_size))
 
-#         self._layers = layers
-#         self.mlp = torch.nn.Sequential(*layers)
-#         self.reset_params(gain=gain)
+        self._layers = layers
+        self.mlp = torch.nn.Sequential(*layers)
+        self.reset_params(gain=gain)
 
-#     def forward(self, inp):
-#         return self.mlp(inp)
+    def forward(self, inp):
+        return self.mlp(inp)
 
-#     def reset_params(self, gain=1.0):
-#         self.apply(lambda x: weights_init_mlp(x, gain=gain))
+    def reset_params(self, gain=1.0):
+        self.apply(lambda x: weights_init_mlp(x, gain=gain))
 
 
 def weights_init_mlp(m, gain=1.0):

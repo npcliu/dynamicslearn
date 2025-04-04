@@ -1,4 +1,5 @@
 # 扩展卡尔曼滤波，时间步长动态变化
+import time
 from matplotlib import pyplot as plt
 import numpy as np
 import h5py
@@ -14,8 +15,8 @@ class MultiJointEKF:
         self.H = np.eye(3)  # 3x3矩阵
         
         # 初始噪声参数（可动态调整）
-        self.Q_base = np.diag([1e-6, 1e-6, 5e-4])  # 过程噪声基准
-        self.R = np.kron(np.eye(n_joints), np.diag([1e-6, 1e-6, 2e-2]))  # 观测噪声
+        self.Q_base = np.diag([1e-4, 1e-4, 5e-4])  # 过程噪声基准
+        self.R = np.kron(np.eye(n_joints), np.diag([5e-3, 5e-3, 2e-2]))  # 观测噪声
         
         # 初始化状态矩阵（n_joints x 3）
         self.x = np.zeros((n_joints, self.state_dim))
@@ -122,7 +123,7 @@ def get_dataset(h5_file_path):
 if __name__ == "__main__":
     # 读取数据集（添加异常处理）
     try:
-        timestamps, q_obs, v_obs, a_obs = get_dataset('sim2realmujocodataset.h5')
+        timestamps, q_obs, v_obs, a_obs = get_dataset('sim2realmujocodatasetnofilter.h5')
     except Exception as e:
         print(f"dataload failed: {str(e)}")
         exit()
@@ -132,12 +133,12 @@ if __name__ == "__main__":
     accelerations = np.zeros_like(a_obs)
     q_filtered = np.zeros_like(q_obs)
     v_filtered = np.zeros_like(v_obs)
-    
+    t_start = time.time()
     # 运行滤波器（添加进度提示）
     total_frames = len(timestamps)-1
     for i in range(total_frames):
         current_time = timestamps[i+1]
-        
+        pro_start = time.time()
         # 预测阶段（添加时间有效性检查）
         if not np.isfinite(current_time):
             print(f"unvalid timestemp at index {i+1}")
@@ -158,7 +159,8 @@ if __name__ == "__main__":
         q_filtered[i] = state[:, 0]
         v_filtered[i] = state[:, 1]
         accelerations[i] = state[:, 2]
-    
+        pro_end = time.time()
+        print('pro_end - pro_start', pro_end - pro_start)
     # 可视化（添加多关节显示）
     plt.figure(figsize=(15,8))
     for j in range(3):  # 显示前3个关节
@@ -169,5 +171,34 @@ if __name__ == "__main__":
         plt.plot(accelerations[:,j], 'r--', label='filted acc')
         plt.title(f'joint {j} acc compare')
         plt.legend()
-    plt.tight_layout()
+    # plt.tight_layout()
+    # plt.show()
+    
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+    # 主坐标轴：训练损失
+    color = 'tab:blue'
+    ax1.set_xlabel('Epochs')
+    ax1.set_ylabel('q Loss', color=color)
+    ax1.plot(v_obs[:,0], 'g-', alpha=0.6, label='v_obs')
+    ax1.plot(v_filtered[:,0], 'r--', label='v_filtered')
+    ax1.tick_params(axis='y', labelcolor=color)
+    fig.tight_layout()  
+    fig.legend(loc='upper right', bbox_to_anchor=(0.9, 0.9))
+    
+    fig, ax2 = plt.subplots(figsize=(12, 6))
+    # 主坐标轴：训练损失
+    color = 'tab:blue'
+    ax2.set_xlabel('Epochs')
+    ax2.set_ylabel('q Loss', color=color)
+    ax2.plot(q_obs[:,0], 'g-', alpha=0.6, label='v_obs')
+    ax2.plot(q_filtered[:,0], 'r--', label='v_filtered')
+    ax2.tick_params(axis='y', labelcolor=color)
+    fig.tight_layout()  
+    fig.legend(loc='upper right', bbox_to_anchor=(0.9, 0.9))
+    
+    # 图表装饰
+    plt.title('plot[3,6](@ref)')
+
+    plt.grid(alpha=0.3)
+
     plt.show()

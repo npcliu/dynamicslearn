@@ -10,7 +10,7 @@ file_config = {
         'label': 'mujoco'
     },
     'isaac': {
-        'path': 'isaacdataset.h5', 
+        'path': 'sim2realmujocodatasetnofilter.h5', 
         'color': 'red',
         'label': 'IsaacGym'
     }
@@ -37,6 +37,7 @@ for dataset_key in ['sim2sim', 'isaac']:
                 'q': np.array(file['q'][:]),
                 'root_v': np.array(file['root_v'][:]),
                 'dq': np.array(file['dq'][:]),
+                'ddq': np.array(file['ddq'][:]),
                 'tau': np.array(file['tau'][:])
             }
             
@@ -85,16 +86,27 @@ for key in dataset_cache.keys():
         label=f'{file_config[key]["label"]} - Torque'
     )
     
-        # 关节力矩对比
+    #     # 关节力矩对比
+    # axes[3].plot(
+    #     data['timestamps'][:,0] * time_ratio,
+    #     data['q_command'][:,0,0],
+    #     color=file_config[key]['color'],
+    #     linestyle='--', 
+    #     linewidth=1.2,
+    #     alpha=0.7,
+    #     label=f'{file_config[key]["label"]} - Torque'
+    # )
+    
     axes[3].plot(
         data['timestamps'][:,0] * time_ratio,
-        data['q_command'][:,0,0],
+        data['ddq'][:,0,0],
         color=file_config[key]['color'],
         linestyle='--', 
         linewidth=1.2,
         alpha=0.7,
         label=f'{file_config[key]["label"]} - Torque'
     )
+    
 # 坐标轴设置
 axes[0].set(
     xlabel='Time (s)',

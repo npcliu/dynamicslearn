@@ -21,6 +21,7 @@ from mechamodlearn import dataset, logger, nested, transform, utils
 from mechamodlearn.metric_tracker import MetricTracker
 from mechamodlearn.odesolver import ActuatedODEWrapper, odeint
 
+validation_flag = False
 
 class TrainerBase(abc.ABC):
 
@@ -239,17 +240,17 @@ class OfflineTrainer(TrainerBase):
             # if 'cpu_memory_MB' in train_metrics:
             #     metrics['peak_cpu_memory_MB'] = max(
             #         metrics.get('peak_cpu_memory_MB', 0), train_metrics['cpu_memory_MB'])
+            if validation_flag == True:
+                if self._validation_dataset is not None:
+                    with utils.Timer() as val_dt:
+                        valid_metrics = self._validation()
+                        this_epoch_valid_metric = valid_metrics['loss/mean']
 
-            # if self._validation_dataset is not None:
-            #     with utils.Timer() as val_dt:
-            #         valid_metrics = self._validation()
-            #         this_epoch_valid_metric = valid_metrics['loss/mean']
+                        self._metric_tracker.add_metric(this_epoch_valid_metric)
 
-            #         self._metric_tracker.add_metric(this_epoch_valid_metric)
-
-            #         if self._metric_tracker.should_stop_early():
-            #             logger.info("Ran out of patience.  Stopping training.")
-            #             break
+                        if self._metric_tracker.should_stop_early():
+                            logger.info("Ran out of patience.  Stopping training.")
+                            break
 
             #     valid_metrics['epoch_time'] = val_dt.dt
 
@@ -263,8 +264,9 @@ class OfflineTrainer(TrainerBase):
             for k, v in train_metrics.items():
                 logger.logkv("training/{}".format(k), v)
 
-            # for k, v in valid_metrics.items():
-            #     logger.logkv("validation/{}".format(k), v)
+            if validation_flag == True:
+                for k, v in valid_metrics.items():
+                    logger.logkv("validation/{}".format(k), v)
 
             if self._logdir:
                 if (epochs_trained % self._ckpt_interval == 0) or (
@@ -337,8 +339,8 @@ class OfflineTrainer(TrainerBase):
         print(train_data.qs_tensors[0].device)
         # print(len(train_data.qs_tensors))
         train_generator = torch.utils.data.DataLoader(train_data, shuffle=self._shuffle,
-                                                      batch_size=self._batch_size)
-        for qs, vs, us, ts in tqdm.tqdm(train_generator, total=len(train_generator)):
+                                                      batch_size=self._batch_size, drop_last=True)
+        for qs, vs, ddqs, us, ts in tqdm.tqdm(train_generator, total=len(train_generator)):
             # print(len(qs))
             # print(qs)
             
@@ -348,10 +350,17 @@ class OfflineTrainer(TrainerBase):
                     ActuatedODEWrapper(self.model),
                     torch.stack(qs).to(self._device),
                     torch.stack(vs).to(self._device),
+                    torch.stack(ddqs).to(self._device),
                     torch.stack(us).to(self._device), 
                     torch.stack(ts).to(self._device), 
                     vlambda=self._vlambda,
                     method=self._integration_method)
+                # loss, loss_info = compute_qvddqloss(
+                #     self.model,
+                #     torch.stack(qs).to(self._device),
+                #     torch.stack(vs).to(self._device),
+                #     torch.stack(ddqs).to(self._device),
+                #     torch.stack(us).to(self._device))
 
             with utils.Timer() as gradtime:
                 loss.backward()
@@ -395,16 +404,19 @@ class OfflineTrainer(TrainerBase):
         if isinstance(val_data, dataset.ActuatedTrajectoryDataset):
             val_data = transform.odepred_transform(val_data, self._pred_horizon)
         val_generator = torch.utils.data.DataLoader(val_data, shuffle=False,
-                                                    batch_size=self._batch_size)
+                                                    batch_size=self._batch_size, drop_last=True)
         loss_ls = []
         loss_info_ls = []
-        for qs, vs, us in tqdm.tqdm(val_generator, total=len(val_generator)):
+        for qs, vs, ddqs, us, ts in tqdm.tqdm(val_generator, total=len(val_generator)):
             with torch.no_grad():
                 loss, loss_info = compute_qvloss(
                     ActuatedODEWrapper(self.model),
                     torch.stack(qs).to(self._device),
                     torch.stack(vs).to(self._device),
-                    torch.stack(us).to(self._device), dt=self._dt, vlambda=self._vlambda,
+                    torch.stack(ddqs).to(self._device),
+                    torch.stack(us).to(self._device), 
+                    torch.stack(ts).to(self._device), 
+                    vlambda=self._vlambda,
                     method=self._integration_method)
 
             loss_ls.append(loss.cpu().detach().item())
@@ -480,7 +492,7 @@ class OfflineTrainer(TrainerBase):
         return metrics
 
 
-def compute_qvloss(model, q_T_B, v_T_B, u_T_B, t_T_B, vlambda=1.0, method='rk4', preds=False):
+def compute_qvloss(model, q_T_B, v_T_B, ddq_T_B, u_T_B, t_T_B, vlambda=1.0, method='rk4', preds=False):
     """Computes T-step loss
     Arguments:
     - `q_T_B` : (Timesteps x Batch_size x qdim) tensor of gen. coordinates
@@ -501,8 +513,9 @@ def compute_qvloss(model, q_T_B, v_T_B, u_T_B, t_T_B, vlambda=1.0, method='rk4',
     # assert len(t_points) == T
     # print(q_T_B[0].shape)
     # Simulate forward
-    solution, u_hat_T_B, qddot_sol_forward_dyn_tensor, qddot_sol_inv_dyn_tensor, u_tensor = \
-                odeint(model, (q_T_B[0], v_T_B[0]), t_T_B, u=u_T_B, method=method,
+    model.diffeq.reset_buffer(q_T_B[0], u_T_B[0])
+    solution, u_hat_T_B, qddot_sol_forward_dyn_tensor, qddot_sol_inv_dyn_tensor, qddot_tensor = \
+                odeint(model, (q_T_B[0], v_T_B[0]), (q_T_B, v_T_B, ddq_T_B), t_T_B, u=u_T_B, method=method,
                        transforms=(lambda x: utils.wrap_to_pi(x, model.thetamask),
                        lambda x: x))
     qpreds_T_B, vpreds_T_B = solution
@@ -510,15 +523,18 @@ def compute_qvloss(model, q_T_B, v_T_B, u_T_B, t_T_B, vlambda=1.0, method='rk4',
     # print(u_hat_T_B)
     # print('qpreds_T_B.shape', qpreds_T_B.shape)
     # Wrap angles
+    # qpreds_T_B = utils.wrap_to_pi(qpreds_T_B.view(-1, model._qdim), model.thetamask).view(
+    #     T, -1, model._qdim)
     qpreds_T_B = utils.wrap_to_pi(qpreds_T_B.view(-1, model._qdim), model.thetamask).view(
-        T, -1, model._qdim)
+        T+1, -1, model._qdim)
+    qpreds_T_B_ = qpreds_T_B[:-1]
     qdiff = utils.diffangles(
-        q_T_B.view(-1, model._qdim), qpreds_T_B.view(-1, model._qdim), mask=model.thetamask).view(
+        q_T_B.view(-1, model._qdim), qpreds_T_B_.view(-1, model._qdim), mask=model.thetamask).view(
             T, -1, model._qdim)
-    # print(q_T_B[1, 0, :])
-    # print(qpreds_T_B[1, 0, :])
+    
+
     # print('qdiff', qdiff.shape)
-    qdiff = qdiff / torch.pi
+    # qdiff = qdiff
     # TT = qdiff.shape[0]  # 获取时间步数
     # # 生成逆序间隔采样索引
     # selected_indices = torch.arange(start=TT-1, end=-1, step=-5)  # 从最后一个元素开始，步长-5
@@ -527,25 +543,28 @@ def compute_qvloss(model, q_T_B, v_T_B, u_T_B, t_T_B, vlambda=1.0, method='rk4',
     # selected_qdiff = qdiff[selected_indices]  # [4, 128, 10]
     # # print(selected_qdiff.shape)
     # q_loss = 0.5 * (selected_qdiff**2).sum(0).sum(-1).mean()
-    q_loss = 0.5 * (qdiff**2).sum(0).sum(-1).mean()
+    q_loss = 0.5 * ((qdiff[2:])**2).sum(0).sum(-1).mean()
     
-    vdiff = (v_T_B - vpreds_T_B)
-    vdiff = vdiff / 20
+    vdiff = (v_T_B - vpreds_T_B[:-1])
+    # print(v_T_B[0:4, 0, 0])
+    # print(vpreds_T_B[0:4, 0, 0])
+    # vdiff = vdiff
     # selected_qdiff = vdiff[selected_indices]  # [4, 128, 10]
     # v_loss = 0.5 * (selected_qdiff**2).sum(0).sum(-1).mean()
     # print(selected_qdiff.shape)
-    v_loss = 0.5 * (vdiff**2).sum(0).sum(-1).mean()
+    v_loss = 0.5 * ((vdiff[2:])**2).sum(0).sum(-1).mean()
     u_pred_size = u_T_B.size(0) - 1
     u_T_B_ = u_T_B[0:u_pred_size]
     udiff = (u_hat_T_B - u_T_B_)
-    udiff = udiff / 10
+    # udiff = udiff 
     u_loss = 0.5 * (udiff**2).sum(0).sum(-1).mean()
     
-    qddotdiff = (qddot_sol_forward_dyn_tensor - qddot_sol_inv_dyn_tensor)
+    qddotdiff = (qddot_sol_forward_dyn_tensor - ddq_T_B[:-1])
     qddot_loss = 0.5 * (qddotdiff**2).sum(0).sum(-1).mean()
     
-    # loss = 1 * (1*q_loss + vlambda * 1 * v_loss + 1 * u_loss + 1 * qddot_loss)
-    loss = 1 * (vlambda * 10 * v_loss + 0.3 * u_loss + 0.3 * qddot_loss)
+    loss = 1 * (1*q_loss + 1 * v_loss + 1 * u_loss + 1 * qddot_loss)
+    # loss = 1 * (1 * u_loss + 1 * qddot_loss)
+    # loss = 1 * (1 * u_loss)
     info = dict(q_loss=q_loss.cpu().detach().item(), v_loss=v_loss.cpu().detach().item(), u_loss=u_loss.cpu().detach().item(), qddot_loss=qddot_loss.cpu().detach().item())
     # loss = 3 * (1*q_loss + vlambda * 3 * v_loss + 3 * u_loss)
     # info = dict(q_loss=q_loss.cpu().detach().item(), v_loss=v_loss.cpu().detach().item(), u_loss=u_loss.cpu().detach().item())
@@ -555,6 +574,48 @@ def compute_qvloss(model, q_T_B, v_T_B, u_T_B, t_T_B, vlambda=1.0, method='rk4',
 
     return loss, info
 
+def compute_qvddqloss(model, q_T_B, v_T_B, ddq_T_B, u_T_B):
+    """Computes T-step loss
+    Arguments:
+    - `q_T_B` : (Timesteps x Batch_size x qdim) tensor of gen. coordinates
+    - `v_T_B` : (Timesteps x Batch_size x qdim) tensor of gen. velocities
+    - `u_T_B` : (Timesteps x Batch_size x udim) tensor of actuator inputs
+              Note: last time-step of u_T_B is ignored
+    - `dt`    : Time-step [s]
+
+    Keyword Arguments:
+    - `vlambda`:  coefficient of vloss (loss = q_loss + vlambda * v_loss) (default=1.0)
+    - `method` :  integration scheme in ['euler', 'midpoint', 'rk4'] (default='rk4')
+    - `preds`  :  will return predicted q_T_b, v_T_B as third return value if True (default=False)
+    """
+
+    T = u_T_B.size(0)
+    u_hat_T_B_tuple = []
+    
+    q_cur = q_T_B[:-1]
+    v_cur = v_T_B[:-1]
+    ddq_cur = ddq_T_B[:-1]
+    
+    q_pre = q_T_B[1:]
+    v_pre = v_T_B[1:]
+    
+    for i in range(T-1):
+        u_hat, _ = model.inv_dynamics(q_cur[i], v_cur[i], ddq_cur[i], q_pre[i], v_pre[i])
+        u_hat_T_B_tuple.append(u_hat)
+    
+    u_hat_T_B = torch.stack(u_hat_T_B_tuple, dim=0)  
+    u_pred_size = T - 1
+    u_T_B_ = u_T_B[:u_pred_size]
+    udiff = (u_hat_T_B - u_T_B_)
+    u_loss = 0.5 * (udiff**2).sum(0).sum(-1).mean()
+    
+    # loss = 1 * (1*q_loss + vlambda * 1 * v_loss + 1 * u_loss + 1 * qddot_loss)
+    loss = 1 * u_loss
+    info = dict(u_loss=u_loss.cpu().detach().item())
+    # loss = 3 * (1*q_loss + vlambda * 3 * v_loss + 3 * u_loss)
+    # info = dict(q_loss=q_loss.cpu().detach().item(), v_loss=v_loss.cpu().detach().item(), u_loss=u_loss.cpu().detach().item())
+
+    return loss, info
 
 def move_optimizer_to_gpu(optimizer):
     """

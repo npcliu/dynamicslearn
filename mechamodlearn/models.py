@@ -24,7 +24,36 @@ class SharedMMVEmbed(torch.nn.Module):
 
 class CholeskyMMNet(torch.nn.Module):
 
-    def __init__(self, qdim, embed=None, hidden_sizes=None, bias=2):
+    def __init__(self, qdim, embed=None, hidden_sizes=None, bias=0.2):
+        super().__init__()
+        self._qdim = qdim
+        self._bias = bias
+
+        if embed is None:
+            if hidden_sizes is None:
+                raise ValueError("embed and hidden_sizes; both can't be None")
+            embed = SharedMMVEmbed(qdim*2, hidden_sizes, activation='relu')
+
+        self.embed = embed
+        self.out = torch.nn.Linear(hidden_sizes[-1], int(qdim * (qdim + 1) / 2))
+
+    def forward(self, q, v):
+        B = q.size(0)
+        x = torch.cat([q, v], dim=-1)
+        L_params = self.out(self.embed(x))
+        L_diag = L_params[:, :self._qdim]
+        L_diag += self._bias
+        L_tril = L_params[:, self._qdim:]
+        L = q.new_zeros(B, self._qdim, self._qdim)
+        L = utils.bfill_lowertriangle(L, L_tril)
+        L = utils.bfill_diagonal(L, L_diag)
+        M = L @ L.transpose(-2, -1)
+
+        return M
+
+class CholeskyMMNet1(torch.nn.Module):
+
+    def __init__(self, qdim, embed=None, hidden_sizes=None, bias=0.):
         super().__init__()
         self._qdim = qdim
         self._bias = bias
@@ -46,15 +75,14 @@ class CholeskyMMNet(torch.nn.Module):
             L_tril = L_params[:, self._qdim:]
             L = q.new_zeros(B, self._qdim, self._qdim)
             L = utils.bfill_lowertriangle(L, L_tril)
-            L = utils.bfill_diagonal(L, L_diag)
-            M = L @ L.transpose(-2, -1)
+            L = L + L.transpose(-2, -1)
+            M = utils.bfill_diagonal(L, L_diag)
 
         else:
             M = self._pos_enforce((self.out(self.embed(q)) + self._bias).unsqueeze(1))
 
         return M
-
-
+    
 class PotentialNet(torch.nn.Module):
 
     def __init__(self, qdim, embed=None, hidden_sizes=None):
@@ -91,6 +119,26 @@ class GeneralizedForceNet(torch.nn.Module):
         assert F.shape == (B, self._qdim, 1), F.shape
         return F
 
+class nonlineardynNet(torch.nn.Module):
+# midpoint和rk4积分方法都要计算好几次正动力学，那正动力学的网络梯度不是
+# 直接q,v到tau产生的，而是好几个中间值产生的，而泥动力学不产生中间值，所以加一个小网络
+# 保持正逆动力学一致性
+    def __init__(self, input_dim, hidden_sizes, output_dim):
+        self._input_dim = input_dim
+        self._hidden_sizes = hidden_sizes
+        self._output_dim = output_dim
+        super().__init__()
+        # self._net = nn.LNMLP(self._input_dim, hidden_sizes, output_dim, activation='elu', gain=GAIN, ln=LN)
+        self._net = nn.ResMLP(self._input_dim, hidden_sizes, output_dim, ln=LN)
+        
+    def forward(self, q, v, qddot, last_q, last_v, last_qddot, delta_t):
+        B = q.size(0)
+        x = torch.cat([q, v, qddot, last_q, last_v, last_qddot, delta_t], dim=-1)
+        F = self._net(x)
+        F = F.unsqueeze(2)
+        assert F.shape == (B, self._output_dim, 1), F.shape
+        return F
+
 class InvdynconsensusNet(torch.nn.Module):
 # midpoint和rk4积分方法都要计算好几次正动力学，那正动力学的网络梯度不是
 # 直接q,v到tau产生的，而是好几个中间值产生的，而泥动力学不产生中间值，所以加一个小网络
@@ -103,9 +151,9 @@ class InvdynconsensusNet(torch.nn.Module):
         # self._net = nn.LNMLP(self._input_dim, hidden_sizes, output_dim, activation='elu', gain=GAIN, ln=LN)
         self._net = nn.ResMLP(self._input_dim, hidden_sizes, output_dim, ln=LN)
         
-    def forward(self, q, v, qddot, v_pre):
+    def forward(self, q, v, qddot, q_pre, v_pre):
         B = q.size(0)
-        x = torch.cat([q, v, qddot, v_pre], dim=-1)
+        x = torch.cat([q, v, qddot, q_pre, v_pre], dim=-1)
         F = self._net(x)
         F = F.unsqueeze(2)
         assert F.shape == (B, self._output_dim, 1), F.shape
@@ -126,6 +174,26 @@ class NnmodelableDynNet(torch.nn.Module):
     def forward(self, q, v, qddot, u, delta_t):
         B = q.size(0)
         x = torch.cat([q, v, qddot, u, delta_t], dim=-1)
+        F = self._net(x)
+        F = F.unsqueeze(2)
+        assert F.shape == (B, self._output_dim, 1), F.shape
+        return F
+    
+class NnmodelableKinNet(torch.nn.Module):
+# midpoint和rk4积分方法都要计算好几次正动力学，那正动力学的网络梯度不是
+# 直接q,v到tau产生的，而是好几个中间值产生的，而泥动力学不产生中间值，所以加一个小网络
+# 保持正逆动力学一致性
+    def __init__(self, input_dim, hidden_sizes, output_dim):
+        self._input_dim = input_dim
+        self._hidden_sizes = hidden_sizes
+        self._output_dim = output_dim
+        super().__init__()
+        # self._net = nn.LNMLP(input_dim, hidden_sizes, output_dim, activation='elu', gain=GAIN, ln=LN)
+        self._net = nn.ResMLP(input_dim, hidden_sizes, output_dim, ln=LN)
+        
+    def forward(self, q, v, qddot, u):
+        B = q.size(0)
+        x = torch.cat([q, v, qddot, u], dim=-1)
         F = self._net(x)
         F = F.unsqueeze(2)
         assert F.shape == (B, self._output_dim, 1), F.shape

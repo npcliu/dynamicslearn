@@ -56,16 +56,22 @@ def get_dataset(system, T, dt, h5_file_path):
         print('please input h5 file!!!')
     else:
         with h5py.File(h5_file_path, 'r') as f:
-            timestamps = f['timestamps'][:]
-            q = f['q'][:].squeeze(axis=1)
-            dq = f['dq'][:].squeeze(axis=1)
-            tau = f['tau'][:].squeeze(axis=1)
+            timestamps_ = f['timestamps'][:]
+            q_ = f['q'][:].squeeze(axis=1)
+            dq_ = f['dq'][:].squeeze(axis=1)
+            ddq_ = f['ddq'][:].squeeze(axis=1)
+            tau_ = f['tau'][:].squeeze(axis=1)
             
+        timestamps = timestamps_[:-1]
+        q = q_[:-1]
+        dq = dq_[:-1]
+        ddq = ddq_[1:] #后向差分得到的，所以第一个对应于第0个的加速度
+        tau = tau_[:-1]
         # 时间差计算（向量化运算优化）
         time_diff = timestamps[1:] - timestamps[:-1]
         # print(time_diff[0:10])
         # print(min(time_diff))
-        invalid_indices = np.where(time_diff < 0.001)[0] + 1  # 标记异常点
+        invalid_indices = np.where(time_diff < 0.0008)[0] + 1  # 标记异常点
         
         # 构建掩码数组
         mask = np.ones(len(timestamps), dtype=bool)
@@ -77,20 +83,22 @@ def get_dataset(system, T, dt, h5_file_path):
         # print(min(time_diff))
         q_cpu = q[mask]
         dq_cpu = dq[mask]
+        ddq_cpu = ddq[mask]
         tau_cpu = tau[mask]
         
         # 重新计算时间差用于加速度计算
         time_diff_valid = timestamps_cpu[1:] - timestamps_cpu[:-1]
         dq_diff = dq_cpu[1:] - dq_cpu[:-1]
-        ddq_cpu = dq_diff / time_diff_valid
+        ddq_cpu_computed = dq_diff / time_diff_valid
         
         # 为使 ddq 与其他数据维度一致，在第一个时刻填入第一个计算值（也可以设为 0）
-        ddq_cpu = np.vstack((ddq_cpu, ddq_cpu[-1, :]))
+        ddq_cpu_computed = np.vstack((ddq_cpu_computed, ddq_cpu_computed[-1, :]))
             
         timestamps_gpu = torch.from_numpy(timestamps_cpu).to(system._device) 
         q_gpu = torch.from_numpy(q_cpu).to(system._device) 
         dq_gpu = torch.from_numpy(dq_cpu).to(system._device) 
         ddq_gpu = torch.from_numpy(ddq_cpu).to(system._device) 
+        ddq_gpu_computed = torch.from_numpy(ddq_cpu_computed).to(system._device) 
         tau_gpu = torch.from_numpy(tau_cpu).to(system._device) 
         
         print(tau_cpu[10:20, 0])
@@ -102,6 +110,7 @@ def get_dataset(system, T, dt, h5_file_path):
         q_gpu_t = torch.stack([q_gpu[i : i + (N - len_t + 1)] for i in range(len_t)], dim=0)
         dq_gpu_t = torch.stack([dq_gpu[i : i + (N - len_t + 1)] for i in range(len_t)], dim=0)
         ddq_gpu_t = torch.stack([ddq_gpu[i : i + (N - len_t + 1)] for i in range(len_t)], dim=0)
+        # ddq_gpu_t = torch.stack([ddq_gpu_computed[i : i + (N - len_t + 1)] for i in range(len_t)], dim=0)
         tau_gpu_t = torch.stack([tau_gpu[i : i + (N - len_t + 1)] for i in range(len_t)], dim=0) 
         q_gpu_t = utils.wrap_to_pi(q_gpu_t.view(-1, system._qdim), system.thetamask).view(
             len_t, -1, system._qdim) 
@@ -123,12 +132,13 @@ def get_dataset(system, T, dt, h5_file_path):
         timestamps_train, timestamps_test = split_data(timestamps_gpu_t)
         q_train, q_test = split_data(q_gpu_t)
         dq_train, dq_test = split_data(dq_gpu_t)
+        ddq_train, ddq_test = split_data(ddq_gpu_t)
         tau_train, tau_test = split_data(tau_gpu_t)
 
-        train_data = (timestamps_train, q_train, dq_train, tau_train)
-        valid_data = (timestamps_test, q_test, dq_test, tau_test)
-        test_data = (timestamps_gpu_t[:, 65000:66000], q_gpu_t[:, 65000:66000, :], 
-                     dq_gpu_t[:, 65000:66000, :], tau_gpu_t[:, 65000:66000, :])
+        train_data = (timestamps_train, q_train, dq_train, ddq_train, tau_train)
+        valid_data = (timestamps_test, q_test, dq_test, ddq_test, tau_test)
+        test_data = (timestamps_gpu_t[:, 650:750], q_gpu_t[:, 650:750, :], 
+                     dq_gpu_t[:, 650:750, :], ddq_gpu_t[:, 650:750, :], tau_gpu_t[:, 650:750, :])
     train_dataset = dataset.ActuatedTrajectoryDataset.FromExternalData(train_data)
     valid_dataset = dataset.ActuatedTrajectoryDataset.FromExternalData(valid_data)
     test_dataset = dataset.ActuatedTrajectoryDataset.FromExternalData(test_data)
@@ -157,15 +167,7 @@ def train(seed: int, dt: float, pred_horizon: int, num_epochs: int, batch_size: 
             'sim2realmujocodataset.h5') 
     print(train_dataset.q_B_T[0])
 
-    def viz(model):
-        t_points = torch.arange(0, test_dataset.q_B_T.size(1) * dt, dt, device=DEVICE)
-        return viz_utils.vizqvmodel(model,
-                                    test_dataset.q_B_T.to(device=DEVICE),
-                                    test_dataset.v_B_T.to(device=DEVICE),
-                                    test_dataset.u_B_T.to(device=DEVICE), t_points)
-
-    model = LearnedRigidBody(system._qdim, system._udim, system.thetamask,
-                             hidden_sizes=[32, 64, 96, 64])
+    model = LearnedRigidBody(system._qdim, system._udim, system.thetamask)
     # potential = models.DelanZeroPotential(1)
     # model = rigidbody.DeLan(1, 32, 3, torch.tensor([1, 0]), udim=1, potential=potential)
 
@@ -178,7 +180,7 @@ def train(seed: int, dt: float, pred_horizon: int, num_epochs: int, batch_size: 
         logdir = Path(logdir) / '{:%Y%m%d_%H%M%S}'.format(datetime.now())
 
     trainer = OfflineTrainer(model, opt, dt, train_dataset, valid_dataset, learning_rate_scheduler=scheduler, 
-                             pred_horizon=pred_horizon, num_epochs=num_epochs, batch_size=batch_size, vlambda=1, log_viz=True, viz_func=viz, 
+                             pred_horizon=pred_horizon, num_epochs=num_epochs, batch_size=batch_size, vlambda=1, log_viz=False, 
                              ckpt_interval=100, summary_interval=200, shuffle=True, integration_method='euler', 
                              logdir=logdir, device=DEVICE)
 
@@ -192,10 +194,10 @@ def train(seed: int, dt: float, pred_horizon: int, num_epochs: int, batch_size: 
 @click.command()
 @click.option('--seed', default=21, type=int)
 @click.option('--dt', default=0.001, type=float)
-@click.option('--pred-horizon', default=10, type=int)
+@click.option('--pred-horizon', default=4, type=int)
 @click.option('--num-epochs', default=600, type=int)
 @click.option('--batch-size', default=500, type=int)
-@click.option('--lr', default=4e-3, type=float)
+@click.option('--lr', default=4e-3, type=float) #4e-3 4e-4 
 @click.option('--ntrajs', default=8192, type=int)
 @click.option('--uscale', default=10.0, type=float)
 @click.option('--logdir', default='simplelog', type=str)

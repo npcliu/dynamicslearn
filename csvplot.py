@@ -3,17 +3,10 @@ import matplotlib.pyplot as plt
 
 # 数据读取与预处理 
 df1 = pd.read_csv('simplelog/isaacdynamic202503251616/progress.csv') #simplelog/20250323_221240/progress.csv
-df2 = pd.read_csv('simplelog/sim2realmujoco20250326_095628/progress.csv')
-df3 = pd.read_csv('simplelog/20250331_234321/progress.csv')
-df4 = pd.read_csv('simplelog/20250331_142704/progress.csv')
+df2 = pd.read_csv('simplelog/sim2realmujoco20250331_234321/progress.csv')
+df3 = pd.read_csv('simplelog/20250404_130454/progress.csv')
+df4 = pd.read_csv('simplelog/20250404_014428/progress.csv')
 
-# df2 = pd.read_csv('simplelog/20250330_230712/progress.csv')
-# df3 = pd.read_csv('simplelog/20250331_093001/progress.csv')
-# df['training/epochs'] = df['training/epochs'].fillna(0)  # 处理缺失的epoch值
-
-# 设置中文显示（如需要）
-# plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS']  # Windows/Mac中文支持
-# plt.rcParams['axes.unicode_minus'] = False
 fig, ax1 = plt.subplots(figsize=(12, 6))
 
 # 主坐标轴：训练损失
