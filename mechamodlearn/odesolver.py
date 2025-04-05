@@ -9,8 +9,9 @@ import numpy as np
 
 class FixedGridODESolver(metaclass=abc.ABCMeta):
 
-    def __init__(self, func, y0, y, grid_constructor=None, transforms=None):
+    def __init__(self, func, dyn_func, y0, y, grid_constructor=None, transforms=None):
         self.func = func
+        self.dyn_func = dyn_func
         self.y0 = y0
         self.y = y
         q, dq = y0
@@ -35,7 +36,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         """Returns the integration order"""
 
     @abc.abstractmethod
-    def step_func(self, func, t, dt, y, u, last_q, last_v, last_qddot):
+    def step_func(self, func, dyn_func, t, dt, y, u, last_q, last_v, last_qddot):
         """Step once through"""
 
     def integrate(self, t, u=None):
@@ -76,7 +77,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
             # print(delta_t[100:110, 0])
             y0 = (q_T_B[j], dq_T_B[j])
             # dy, _ = self.step_func(self.func, t0, delta_t, y0, u=u[j - 1])
-            dy, qddot_sol_forward_dyn = self.step_func(self.func, t0, delta_t, y0, u[j], q_T_B[j-1], dq_T_B[j-1], ddq_T_B[j-1])
+            dy, qddot_sol_forward_dyn = self.step_func(self.func, self.dyn_func, t0, delta_t, y0, u[j], q_T_B[j-1], dq_T_B[j-1], ddq_T_B[j-1])
             y1 = tuple(trans(y0_ + dy_) for y0_, dy_, trans in zip(y0, dy, self.transforms))
             # print(len(t))
             # print(dy)
@@ -94,6 +95,10 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
                     q_T_B[j], dq_T_B[j], ddq_T_B[j], 
                     q_T_B[j-1], dq_T_B[j-1], ddq_T_B[j-1], 
                     u[j-1], delta_t)
+                # u_hat, qddot_sol_inv_dyn = self.dyn_func.diffeq.inv_dynamics(
+                #     q_T_B[j], dq_T_B[j], ddq_T_B[j], 
+                #     q_T_B[j-1], dq_T_B[j-1], ddq_T_B[j-1], 
+                #     u[j-1], delta_t)
                 # dy, qddot_sol_forward_dyn = self.step_func(self.func, t0, delta_t, y0, u_hat, ddq_T_B[j-1])
 
                 # u_hat, qddot_sol_inv_dyn = self.func.diffeq.inv_dynamics(q, v, qddot_sol_forward_dyn, q_pre, v_pre)
@@ -103,7 +108,8 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
                 qddot_tuple.append(qddot)
                 qddot_sol_forward_dyn_tuple.append(qddot_sol_forward_dyn)
                 # qddot_sol_forward_dyn_tuple.append(qddot_sol_inv_dyn)
-                qddot_sol_inv_dyn_tuple.append(qddot_sol_inv_dyn)
+                # qddot_sol_inv_dyn_tuple.append(qddot_sol_inv_dyn)
+                qddot_sol_inv_dyn_tuple.append(qddot_sol_forward_dyn)
                 j += 1
             y0 = y1
         #     print(len(solution[0]), len(solution[0][0]), len(solution[0][0][0]))
@@ -136,8 +142,14 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
 
 class Euler(FixedGridODESolver):
 
-    def step_func(self, func, t, dt, y, u, last_q, last_v, last_qddot):
-        k1, qddot_sol = func(dt, y, u, last_q, last_v, last_qddot)
+    def step_func(self, func, dyn_func, t, dt, y, u, last_q, last_v, last_qddot):
+        # k1, qddot_sol = func(dt, y, u, last_q, last_v, last_qddot)
+        q, v = y
+        # qddot, qddot_sol = dyn_func.diffeq(q, v, u, last_qddot, dt)
+        qddot, qddot_sol = func.diffeq(q, v, u, last_qddot, dt)
+        delta_q, delta_v = func.diffeq.delta_qv(q, v, qddot, u, last_q, last_v, dt)
+        k1 = (v + delta_q, qddot + delta_v)
+        # k1 = (v, qddot)
         return tuple(dt * f_ for f_ in k1), qddot_sol
 
     @property
@@ -185,7 +197,7 @@ def rk4_alt_step_func(func, t, dt, y, k1=None, u=None):
                  for k1_, k2_, k3_, k4_ in zip(k1, k2, k3, k4))
 
 
-def odeint(func, y0, y, t, method=None, transforms=None, **kwargs):
+def odeint(func, dyn_func, y0, y, t, method=None, transforms=None, **kwargs):
     """Integrates `func` with initial conditions `y0` at points specified by `t`
     Arguments:
     - `func` : function to integrate: ydot = func(t, y, u=u)
@@ -196,8 +208,8 @@ def odeint(func, y0, y, t, method=None, transforms=None, **kwargs):
     - `transforms` : a function applied after every step is computed, e.g. wrap_to_pi (default=None)
     """
 
-    tensor_input, func, y0, t = _check_inputs(func, y0, t)
-    solver = SOLVERS[method](func, y0, y, transforms=transforms)
+    tensor_input, func, dyn_func, y0, t = _check_inputs(func, dyn_func, y0, t)
+    solver = SOLVERS[method](func, dyn_func, y0, y, transforms=transforms)
     solution, u_hat, qddot_sol_forward_dyn_tensor, qddot_sol_inv_dyn_tensor, qddot_tensor = solver.integrate(t, **kwargs)
     if tensor_input:
         solution = solution[0]
@@ -218,9 +230,9 @@ class ActuatedODEWrapper:
     def forward(self, delta_t, y, u, last_q, last_v, last_qddot):
         (q, v) = y
         qddot, qddot_sol = self.diffeq(q, v, u, last_qddot, delta_t)
-        delta_q, delta_v = self.diffeq.delta_qv(q, v, qddot, u)
-        dy = (v + delta_q, qddot + delta_v)
-        # dy = (v, qddot)
+        # delta_q, delta_v = self.diffeq.delta_qv(q, v, qddot, u)
+        # dy = (v + delta_q, qddot + delta_v)
+        dy = (v, qddot)
         return dy, qddot_sol
 
     def __call__(self, *args, **kwargs):
@@ -248,9 +260,11 @@ def _decreasing(t):
     return (t[1:] < t[:-1]).all()
 
 
-def _check_inputs(func, y0, t):
+def _check_inputs(func, dyn_func, y0, t):
     if not isinstance(func, ActuatedODEWrapper):
         func = ActuatedODEWrapper(func)
+    if not isinstance(dyn_func, ActuatedODEWrapper):
+        dyn_func = ActuatedODEWrapper(dyn_func)
 
     tensor_input = False
     # print([len(item) for item in y0])
@@ -274,4 +288,4 @@ def _check_inputs(func, y0, t):
     # if not torch.is_floating_point(t):
     #     raise TypeError('`t` must be a floating point Tensor but is a {}'.format(t.type()))
 
-    return tensor_input, func, y0, t
+    return tensor_input, func, dyn_func, y0, t

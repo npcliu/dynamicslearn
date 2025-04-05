@@ -191,9 +191,29 @@ class NnmodelableKinNet(torch.nn.Module):
         # self._net = nn.LNMLP(input_dim, hidden_sizes, output_dim, activation='elu', gain=GAIN, ln=LN)
         self._net = nn.ResMLP(input_dim, hidden_sizes, output_dim, ln=LN)
         
-    def forward(self, q, v, qddot, u):
+    def forward(self, q, v, u, last_q, delta_t):
         B = q.size(0)
-        x = torch.cat([q, v, qddot, u], dim=-1)
+        x = torch.cat([q, v, u, last_q, delta_t], dim=-1)
+        F = self._net(x)
+        F = F.unsqueeze(2)
+        assert F.shape == (B, self._output_dim, 1), F.shape
+        return F
+    
+class NnmodelableKindqNet(torch.nn.Module):
+# midpoint和rk4积分方法都要计算好几次正动力学，那正动力学的网络梯度不是
+# 直接q,v到tau产生的，而是好几个中间值产生的，而泥动力学不产生中间值，所以加一个小网络
+# 保持正逆动力学一致性
+    def __init__(self, input_dim, hidden_sizes, output_dim):
+        self._input_dim = input_dim
+        self._hidden_sizes = hidden_sizes
+        self._output_dim = output_dim
+        super().__init__()
+        # self._net = nn.LNMLP(input_dim, hidden_sizes, output_dim, activation='elu', gain=GAIN, ln=LN)
+        self._net = nn.ResMLP(input_dim, hidden_sizes, output_dim, ln=LN)
+        
+    def forward(self, v, qddot, last_v, delta_t):
+        B = v.size(0)
+        x = torch.cat([v, qddot, last_v, delta_t], dim=-1)
         F = self._net(x)
         F = F.unsqueeze(2)
         assert F.shape == (B, self._output_dim, 1), F.shape

@@ -163,8 +163,10 @@ def train(seed: int, dt: float, pred_horizon: int, num_epochs: int, batch_size: 
     system = ExternalData(10, 10, DEVICE)
     # train_dataset, valid_dataset, test_dataset = get_dataset(system, pred_horizon * dt, dt, 
     #         'isaacdataset.h5') #isaacdataset
+    # train_dataset, valid_dataset, test_dataset = get_dataset(system, pred_horizon * dt, dt, 
+    #         'sim2realmujocodataset.h5') 
     train_dataset, valid_dataset, test_dataset = get_dataset(system, pred_horizon * dt, dt, 
-            'sim2realmujocodataset.h5') 
+            'isaacdataset_filter.h5') 
     print(train_dataset.q_B_T[0])
 
     model = LearnedRigidBody(system._qdim, system._udim, system.thetamask)
@@ -197,7 +199,7 @@ def train(seed: int, dt: float, pred_horizon: int, num_epochs: int, batch_size: 
 @click.option('--pred-horizon', default=4, type=int)
 @click.option('--num-epochs', default=600, type=int)
 @click.option('--batch-size', default=500, type=int)
-@click.option('--lr', default=4e-3, type=float) #4e-3 4e-4 
+@click.option('--lr', default=7e-3, type=float) #4e-3 4e-4 
 @click.option('--ntrajs', default=8192, type=int)
 @click.option('--uscale', default=10.0, type=float)
 @click.option('--logdir', default='simplelog', type=str)

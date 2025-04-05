@@ -37,7 +37,7 @@ def vizqvmodel(model, q_B_T, v_B_T, ddq_B_T, u_B_T, t_B_T, method='rk4'):
     with torch.no_grad():
         # Simulate forward
         model.reset_buffer(q_T_B[0], u_T_B[0])
-        solution, u_hat_T_B, qddot_tensor, _, _ = odeint(model, (q_T_B[0], v_T_B[0]), (q_T_B, v_T_B, ddq_T_B),
+        solution, u_hat_T_B, qddot_tensor, _, _ = odeint(model, model, (q_T_B[0], v_T_B[0]), (q_T_B, v_T_B, ddq_T_B),
                                                          t_T_B, u=u_T_B, method=method,
                                         transforms=(lambda x: utils.wrap_to_pi(x, model.thetamask),
                                                     lambda x: x))

@@ -4,7 +4,7 @@ import abc
 import torch
 
 from mechamodlearn import nn, utils
-from mechamodlearn.models import CholeskyMMNet, PotentialNet, GeneralizedForceNet, InvdynconsensusNet, NnmodelableDynNet, CholeskyMMNet1, nonlineardynNet, NnmodelableKinNet
+from mechamodlearn.models import CholeskyMMNet, PotentialNet, GeneralizedForceNet, InvdynconsensusNet, NnmodelableDynNet, CholeskyMMNet1, nonlineardynNet, NnmodelableKinNet, NnmodelableKindqNet
 
 
 class AbstractRigidBody:
@@ -179,7 +179,8 @@ class LearnedRigidBody(AbstractRigidBody, torch.nn.Module):
         self._forw_potential = PotentialNet(qdim, self._inv_potential.embed, hidden_sizes=[16, 16])
         self._forw_generalized_force = GeneralizedForceNet(qdim, hidden_sizes=[32, 16])
         
-        self._unmodelable_kin = NnmodelableKinNet((qdim*3)+udim, hidden_sizes=[64, 32, 24], output_dim=qdim*2)
+        self._unmodelable_kin = NnmodelableKinNet((qdim*4)+1, hidden_sizes=[32, 16], output_dim=qdim)
+        self._unmodelable_kindq = NnmodelableKindqNet((qdim*3)+1, hidden_sizes=[64, 32], output_dim=qdim)
         
         # self._invdyn_consensus = InvdynconsensusNet((qdim*5), hidden_sizes=[64, 64, 32, 16], output_dim=qdim)
         # # udim+1:tau的维度加上delta_t的维度
@@ -216,9 +217,10 @@ class LearnedRigidBody(AbstractRigidBody, torch.nn.Module):
     # def unmodelable_inv_dyn(self, q, v, qddot, v_pre):
     #     return self._unmodelable_inv_dyn(q, v, qddot, v_pre)
 
-    def delta_qv(self, q, v, qddot, u):
-        out = self._unmodelable_kin(q, v, qddot, u)
-        return out[:, :self._qdim].squeeze(2), out[:, self._qdim:].squeeze(2)
+    def delta_qv(self, q, v, qddot, u, last_q, last_v, delta_t):
+        out = self._unmodelable_kin(q, v, u, last_q, delta_t)
+        outdq = self._unmodelable_kindq(v, u, last_v, delta_t)
+        return out.squeeze(2), outdq.squeeze(2)
 
     def inv_dynamics(self, q, v, qddot, last_q, last_v, last_qddot, last_u, delta_t):
         # # 机器人逆动力学，计算力矩

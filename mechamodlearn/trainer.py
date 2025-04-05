@@ -205,6 +205,8 @@ class OfflineTrainer(TrainerBase):
         self._viz_func = viz_func
         self._device = device
         self.model.to(device=self._device)
+        self.dyn_model = torch.load('simplelog/sim2realmujoco20250404_180540/full_model_epoch_300.pt', weights_only=False)
+        self.dyn_model.to(device=self._device)
         
     def train(self):
         logger.info("Begin training...")
@@ -348,6 +350,7 @@ class OfflineTrainer(TrainerBase):
             with utils.Timer() as losstime:
                 loss, loss_info = compute_qvloss(
                     ActuatedODEWrapper(self.model),
+                    ActuatedODEWrapper(self.dyn_model),
                     torch.stack(qs).to(self._device),
                     torch.stack(vs).to(self._device),
                     torch.stack(ddqs).to(self._device),
@@ -492,7 +495,7 @@ class OfflineTrainer(TrainerBase):
         return metrics
 
 
-def compute_qvloss(model, q_T_B, v_T_B, ddq_T_B, u_T_B, t_T_B, vlambda=1.0, method='rk4', preds=False):
+def compute_qvloss(model, dyn_model, q_T_B, v_T_B, ddq_T_B, u_T_B, t_T_B, vlambda=1.0, method='rk4', preds=False):
     """Computes T-step loss
     Arguments:
     - `q_T_B` : (Timesteps x Batch_size x qdim) tensor of gen. coordinates
@@ -514,8 +517,9 @@ def compute_qvloss(model, q_T_B, v_T_B, ddq_T_B, u_T_B, t_T_B, vlambda=1.0, meth
     # print(q_T_B[0].shape)
     # Simulate forward
     model.diffeq.reset_buffer(q_T_B[0], u_T_B[0])
+    dyn_model.diffeq.reset_buffer(q_T_B[0], u_T_B[0])
     solution, u_hat_T_B, qddot_sol_forward_dyn_tensor, qddot_sol_inv_dyn_tensor, qddot_tensor = \
-                odeint(model, (q_T_B[0], v_T_B[0]), (q_T_B, v_T_B, ddq_T_B), t_T_B, u=u_T_B, method=method,
+                odeint(model, dyn_model, (q_T_B[0], v_T_B[0]), (q_T_B, v_T_B, ddq_T_B), t_T_B, u=u_T_B, method=method,
                        transforms=(lambda x: utils.wrap_to_pi(x, model.thetamask),
                        lambda x: x))
     qpreds_T_B, vpreds_T_B = solution
@@ -562,7 +566,7 @@ def compute_qvloss(model, q_T_B, v_T_B, ddq_T_B, u_T_B, t_T_B, vlambda=1.0, meth
     qddotdiff = (qddot_sol_forward_dyn_tensor - ddq_T_B[:-1])
     qddot_loss = 0.5 * (qddotdiff**2).sum(0).sum(-1).mean()
     
-    loss = 1 * (1*q_loss + 1 * v_loss + 1 * u_loss + 1 * qddot_loss)
+    loss = 1 * (2*q_loss + 2*v_loss + 1 * u_loss + 1 * qddot_loss)
     # loss = 1 * (1 * u_loss + 1 * qddot_loss)
     # loss = 1 * (1 * u_loss)
     info = dict(q_loss=q_loss.cpu().detach().item(), v_loss=v_loss.cpu().detach().item(), u_loss=u_loss.cpu().detach().item(), qddot_loss=qddot_loss.cpu().detach().item())

@@ -3,9 +3,9 @@ import matplotlib.pyplot as plt
 
 # 数据读取与预处理 
 df1 = pd.read_csv('simplelog/isaacdynamic202503251616/progress.csv') #simplelog/20250323_221240/progress.csv
-df2 = pd.read_csv('simplelog/sim2realmujoco20250331_234321/progress.csv')
-df3 = pd.read_csv('simplelog/20250404_130454/progress.csv')
-df4 = pd.read_csv('simplelog/20250404_014428/progress.csv')
+df2 = pd.read_csv('simplelog/20250405_123617/progress.csv')
+df3 = pd.read_csv('simplelog/20250405_123617/progress.csv')
+df4 = pd.read_csv('simplelog/20250405_144655/progress.csv')
 
 fig, ax1 = plt.subplots(figsize=(12, 6))
 

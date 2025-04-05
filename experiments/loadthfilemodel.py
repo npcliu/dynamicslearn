@@ -30,4 +30,4 @@ def load_and_save_full_model(epoch: int, logdir: str):
     return model
 
 if __name__ == '__main__':
-    load_and_save_full_model(599, 'simplelog/20250404_014428')
+    load_and_save_full_model(300, 'simplelog/20250404_180540')

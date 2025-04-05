@@ -95,7 +95,7 @@ if __name__ == '__main__':
     # test_dataset = get_dataset(system, T, dt, 'isaacdataset.h5')
     # model = torch.load('simplelog/20250325_161619/metrics_20250326-011730.pt', weights_only=False, map_location='cpu')
     test_dataset = get_dataset(system, T, dt, 'sim2realmujocodataset.h5')
-    model = torch.load('simplelog/20250404_014428/full_model_epoch_599.pt', weights_only=False, map_location='cpu')
+    model = torch.load('simplelog/20250404_180540/full_model_epoch_300.pt', weights_only=False, map_location='cpu')
     
     # assert torch.allclose(model(test_input), loaded_model(test_input))
     t_points = torch.arange(0, T, dt, device=DEVICE)
