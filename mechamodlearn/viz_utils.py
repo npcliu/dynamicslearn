@@ -26,24 +26,20 @@ def plot_traj(system_x_T_B, model_x_T_B, tstar):
     return fig
 
 
-def vizqvmodel(model, q_B_T, v_B_T, ddq_B_T, u_B_T, t_B_T, method='rk4'):
+def vizqvmodel(model, q_B_T, v_B_T, u_B_T, t_B_T, method='rk4'):
     B = q_B_T.size(0)
     # TODO:画图时这些张量或元组的维度还有问题，要改
     q_T_B = q_B_T.transpose(1, 0)
     v_T_B = v_B_T.transpose(1, 0)
-    ddq_T_B = ddq_B_T.transpose(1, 0)
     u_T_B = u_B_T.transpose(1, 0)
     t_T_B = t_B_T.transpose(1, 0)
     with torch.no_grad():
         # Simulate forward
-        model.reset_buffer(q_T_B[0], u_T_B[0])
-        solution, u_hat_T_B, qddot_tensor, _, _ = odeint(model, model, (q_T_B[0], v_T_B[0]), (q_T_B, v_T_B, ddq_T_B),
-                                                         t_T_B, u=u_T_B, method=method,
+        solution, u_hat_T_B, _, _, _ = odeint(model, (q_T_B[0],
+                                                v_T_B[0]), t_T_B, u=u_T_B, method=method,
                                         transforms=(lambda x: utils.wrap_to_pi(x, model.thetamask),
                                                     lambda x: x))
-        qpreds_T_B_, vpreds_T_B_ = solution
-        qpreds_T_B = qpreds_T_B_[:-1]
-        vpreds_T_B = vpreds_T_B_[:-1]
+        qpreds_T_B, vpreds_T_B = solution
         qpreds_T_B = utils.wrap_to_pi(qpreds_T_B.view(-1, model._qdim), model.thetamask).view(
             -1, B, model._qdim)
 
@@ -61,11 +57,6 @@ def vizqvmodel(model, q_B_T, v_B_T, ddq_B_T, u_B_T, t_B_T, method='rk4'):
         'utraj':
             plot_traj(u_T_B[0:99, 0:2, 0:5].detach().cpu().numpy(),
                       u_hat_T_B[:, 0:2, 0:5].detach().cpu().numpy(), t_T_B[0:99, 0:2, 0].detach().cpu().numpy())
-    }
-    qddot_fig = {
-        'utraj':
-            plot_traj(ddq_T_B[0:99, 0:2, 0:5].detach().cpu().numpy(),
-                      qddot_tensor[0:99, 0:2, 0:5].detach().cpu().numpy(), t_T_B[0:99, 0:2, 0].detach().cpu().numpy())
     }
 
     return {**q_fig, **v_fig}

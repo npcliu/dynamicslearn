@@ -10,7 +10,7 @@ from mechamodlearn import utils
 
 class ActuatedTrajectoryDataset(dataset.TensorDataset):
 
-    def __init__(self, traj_q_T_B, traj_v_T_B, traj_ddq_T_B, traj_u_T_B, timestamps):
+    def __init__(self, traj_q_T_B, traj_v_T_B, traj_u_T_B, timestamps):
         """
         Arguments:
         - `traj_q_T_B`: B trajectories generalized positions of timesteps T
@@ -19,17 +19,16 @@ class ActuatedTrajectoryDataset(dataset.TensorDataset):
         """
         self.q_B_T = traj_q_T_B.transpose(1, 0)
         self.v_B_T = traj_v_T_B.transpose(1, 0)
-        self.ddq_B_T = traj_ddq_T_B.transpose(1, 0)
         self.u_B_T = traj_u_T_B.transpose(1, 0)
         self.t_B_T = timestamps.transpose(1, 0)
         
-        assert self.q_B_T.size(0) == self.v_B_T.size(0) == self.ddq_B_T.size(0) == self.u_B_T.size(0)
+        assert self.q_B_T.size(0) == self.v_B_T.size(0) == self.u_B_T.size(0)
 
     def __len__(self):
         return self.q_B_T.size(0)
 
     def __getitem__(self, index):
-        return (self.q_B_T[index], self.v_B_T[index], self.ddq_B_T[index], self.u_B_T[index], self.t_B_T[index])
+        return (self.q_B_T[index], self.v_B_T[index], self.u_B_T[index])
 
     @classmethod
     def FromSystem(cls, system, q_B, v_B, u_T_B, t_points, method='rk4'):
@@ -64,14 +63,14 @@ class ActuatedTrajectoryDataset(dataset.TensorDataset):
         for a given system and time
         """
 
-        timestamps_data, q_data, dq_data, ddq_data, tau_data = data
+        timestamps_data, q_data, dq_data, tau_data = data
         # print(timestamps_data.shape)
         # print(q_data.shape)
-        return cls(q_data, dq_data, ddq_data, tau_data, timestamps_data)
+        return cls(q_data, dq_data, tau_data, timestamps_data)
     
 class ODEPredDataset(dataset.Dataset):
 
-    def __init__(self, qs: list, vs: list, ddqslist: list, ulist: list, tlist: list):
+    def __init__(self, qs: list, vs: list, ulist: list, tlist: list):
         """
         Arguments:
         - `qs`: list of len T, containing batches of B
@@ -85,14 +84,12 @@ class ODEPredDataset(dataset.Dataset):
         assert qs[0].size(0) == vs[0].size(0) == ulist[0].size(0) == tlist[0].size(0)  # same batch size
         self.qs_tensors = qs
         self.vs_tensors = vs
-        self.ddq_tensors = ddqslist
         self.u_tensors = ulist
         self.t_tensors = tlist
 
     def __getitem__(self, index):
         return (tuple(q[index]
                       for q in self.qs_tensors), tuple(v[index] for v in self.vs_tensors), tuple(
-                          ddq[index] for ddq in self.ddq_tensors), tuple(
                           u[index] for u in self.u_tensors), tuple(
                           t[index] for t in self.t_tensors))
 

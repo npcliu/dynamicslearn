@@ -16,7 +16,8 @@ class ExternalData:
 def load_and_save_full_model(epoch: int, logdir: str):
     # 加载参数
     system = ExternalData(10, 10, DEVICE)
-    model = LearnedRigidBody(system._qdim, system._udim, system.thetamask)
+    model = LearnedRigidBody(system._qdim, system._udim, system.thetamask,
+                             hidden_sizes=[32, 32, 32, 32])
     model_path = Path(logdir) / f"model_state_epoch_{epoch}.th"
     model.load_state_dict(torch.load(model_path, map_location='cpu'))
     model.eval()
@@ -30,4 +31,4 @@ def load_and_save_full_model(epoch: int, logdir: str):
     return model
 
 if __name__ == '__main__':
-    load_and_save_full_model(300, 'simplelog/20250404_180540')
+    load_and_save_full_model(599, 'simplelog/20250331_234321')

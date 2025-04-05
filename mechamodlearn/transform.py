@@ -20,7 +20,6 @@ def fill_windowed(ls, traj_T_D, chunk_size, step):
 def odepred_transform(traj_dataset: ActuatedTrajectoryDataset, chunk_size: int) -> ODEPredDataset:
     qs_C = [[] for _ in range(chunk_size)]
     vs_C = [[] for _ in range(chunk_size)]
-    ddqs_C = [[] for _ in range(chunk_size)]
     us_C = [[] for _ in range(chunk_size)]
     ts_C = [[] for _ in range(chunk_size)]
     
@@ -40,7 +39,6 @@ def odepred_transform(traj_dataset: ActuatedTrajectoryDataset, chunk_size: int) 
     elif traj_dataset.q_B_T.size(1) == chunk_size:
         qs_C = traj_dataset.q_B_T.unbind(1)
         vs_C = traj_dataset.v_B_T.unbind(1)
-        ddqs_C = traj_dataset.ddq_B_T.unbind(1)
         us_C = traj_dataset.u_B_T.unbind(1)
         ts_C = traj_dataset.t_B_T.unbind(1)
         # print(traj_dataset.q_B_T.shape)
@@ -55,4 +53,4 @@ def odepred_transform(traj_dataset: ActuatedTrajectoryDataset, chunk_size: int) 
 
     assert len(qs_C) == len(vs_C) == len(us_C) == len(ts_C)
 
-    return ODEPredDataset(qs_C, vs_C, ddqs_C, us_C, ts_C)
+    return ODEPredDataset(qs_C, vs_C, us_C, ts_C)

@@ -37,7 +37,6 @@ for dataset_key in ['sim2sim', 'isaac']:
                 'q': np.array(file['q'][:]),
                 'root_v': np.array(file['root_v'][:]),
                 'dq': np.array(file['dq'][:]),
-                # 'ddq': np.array(file['ddq'][:]),
                 'tau': np.array(file['tau'][:])
             }
             
@@ -86,27 +85,16 @@ for key in dataset_cache.keys():
         label=f'{file_config[key]["label"]} - Torque'
     )
     
-    #     # 关节力矩对比
-    # axes[3].plot(
-    #     data['timestamps'][:,0] * time_ratio,
-    #     data['q_command'][:,0,0],
-    #     color=file_config[key]['color'],
-    #     linestyle='--', 
-    #     linewidth=1.2,
-    #     alpha=0.7,
-    #     label=f'{file_config[key]["label"]} - Torque'
-    # )
-    
-    # axes[3].plot(
-    #     data['timestamps'][:,0] * time_ratio,
-    #     data['ddq'][:,0,0],
-    #     color=file_config[key]['color'],
-    #     linestyle='--', 
-    #     linewidth=1.2,
-    #     alpha=0.7,
-    #     label=f'{file_config[key]["label"]} - Torque'
-    # )
-    
+        # 关节力矩对比
+    axes[3].plot(
+        data['timestamps'][:,0] * time_ratio,
+        data['q_command'][:,0,0],
+        color=file_config[key]['color'],
+        linestyle='--', 
+        linewidth=1.2,
+        alpha=0.7,
+        label=f'{file_config[key]["label"]} - Torque'
+    )
 # 坐标轴设置
 axes[0].set(
     xlabel='Time (s)',
@@ -132,13 +120,13 @@ axes[2].set(
 axes[2].grid(True, linestyle=':')
 axes[2].legend(loc='upper right')
 
-# axes[3].set(
-#     xlabel='Time (s)', 
-#     ylabel='Joint command (rad)',
-#     title='Joint command Profile Comparison'
-# ) 
-# axes[3].grid(True, linestyle=':')
-# axes[3].legend(loc='upper right')
+axes[3].set(
+    xlabel='Time (s)', 
+    ylabel='Joint command (rad)',
+    title='Joint command Profile Comparison'
+) 
+axes[3].grid(True, linestyle=':')
+axes[3].legend(loc='upper right')
 
 plt.tight_layout()
 plt.show()
